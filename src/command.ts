@@ -98,6 +98,7 @@ export async function saveHandoff(
       title: input.cwd ? basename(input.cwd) : '未命名项目',
       projectKey,
       createdAt: Date.now(),
+      cwd: input.cwd,
     }
     await threads.put(thread.id, thread)
   }

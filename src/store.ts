@@ -20,6 +20,8 @@ export interface ThreadRow {
   title: string
   projectKey: string
   createdAt: number
+  /** 来源会话 cwd（用于按工作区过滤） */
+  cwd?: string
 }
 
 export interface NoteRow {
@@ -67,6 +69,7 @@ const threadSchema = z.object({
   title: z.string(),
   projectKey: z.string(),
   createdAt: z.number(),
+  cwd: z.string().optional(),
 })
 
 const noteSchema = z.object({

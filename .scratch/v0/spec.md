@@ -47,9 +47,9 @@ domain `handoff_board` v1，两张表：
 ### 5.2 AI 工具四件套（ctx.tools.register，defineTool 定义）
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `board` | project?(string) limit?(number,默认20) | 线程分组的条目 bullet 清单（日期 \| 标题 \| 状态 \| 文件数 \| id），时间倒序 |
+| `board` | （无参数，全量返回） | 线程分组的条目 bullet 清单（日期 \| 标题 \| 状态 \| 类型(主对话/🤖子代理+父id) \| 文件数 \| id），时间倒序 |
 | `read_handoff` | id(string, required) | 六段全文 markdown |
-| `write_handoff` | session_id?(string，缺省=当前会话) | `{note_id, thread_title, title}` 文本回执 |
+| `write_handoff` | session_id?(string，缺省=当前会话) | 回执文本 + `{note_id, thread_title, title}` |
 | `who_else` | path(string, required) | 仅「活着的」其他会话（剔除调用者自身），附最后触达时间 |
 
 ### 5.3 卡片按钮（列表与画布共用）

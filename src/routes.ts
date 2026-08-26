@@ -55,7 +55,9 @@ export function mountBoardRoutes(ctx: RouteDeps['ctx'], domain: BoardDomain): ()
   }
 
   // ── 状态：线程 + 条目（含实时归档态映射）──
-  register(BOARD_BASE + '/state', guarded(async (_req, res) => {
+  register(BOARD_BASE + '/state', guarded(async (req, res) => {
+    const url = new URL(req.url || '/', 'http://local')
+    const wsFilter = url.searchParams.get('ws') || ''
     const sessionMap = new Map(
       (await ctx.sessionQuery.listSessions()).map((r: any) => [r.header.id, r]),
     )
@@ -64,7 +66,10 @@ export function mountBoardRoutes(ctx: RouteDeps['ctx'], domain: BoardDomain): ()
       if (!s) return '未知'
       return s.live ? '进行中' : '已归档'
     }
-    const threads = [...domain.table('threads').entries()].map(([, t]) => t as any)
+    let threads = [...domain.table('threads').entries()].map(([, t]) => t as any)
+    if (wsFilter) threads = threads.filter((t) => (t.cwd ?? '').startsWith(wsFilter))
+    const threadIds = new Set(threads.map((t) => t.id))
+    const workspaces = [...new Set(threads.map((t) => t.cwd).filter(Boolean))]
     const notes = [...domain.table('notes').entries()].map(([, n]) => n as any)
       .sort((a, b) => b.createdAt - a.createdAt)
       .map((n) => ({
@@ -76,9 +81,23 @@ export function mountBoardRoutes(ctx: RouteDeps['ctx'], domain: BoardDomain): ()
         body: n.body,
         files: n.files,
         provenance: n.provenance,
+        parentSession: (sessionMap.get(n.sessionId)?.header?.parentSession ?? '').slice(0, 8),
+        kind: (sessionMap.get(n.sessionId)?.header?.origin === 'subagent') ? 'subagent' : 'main',
         status: statusOf(n.sessionId),
+        kind: (sessionMap.get(n.sessionId)?.header?.origin === 'subagent') ? 'subagent' : 'main',
       }))
-    json(res, 200, { ok: true, threads, notes })
+        const notedSessions = new Set(notes.map((n: any) => n.sessionId))
+    const unnoted = [...sessionMap.values()]
+      .filter((r: any) => !notedSessions.has(r.header.id))
+      .sort((a: any, b: any) => b.header.createdAt - a.header.createdAt)
+      .slice(0, 30)
+      .map((r: any) => ({
+        sessionId: r.header.id,
+        createdAt: r.header.createdAt,
+        status: r.live ? '进行中' : '已归档',
+        kind: r.header.origin === 'subagent' ? 'subagent' : 'main',
+      }))
+    json(res, 200, { ok: true, threads, notes, unnoted, workspaces })
   }))
 
   // ── 接续：从一条交接条开新会话并注入全文 ──

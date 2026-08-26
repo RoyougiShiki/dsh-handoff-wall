@@ -8,6 +8,8 @@ import { createElement as rc, useEffect, useState } from 'react'
 const BASE = '/handoff-board'
 
 interface NoteV {
+  parentSession?: string
+  kind?: string
   id: string
   threadId: string
   sessionId: string
@@ -28,6 +30,8 @@ interface StateV {
   ok: boolean
   threads: ThreadV[]
   notes: NoteV[]
+  unnoted?: Array<{ sessionId: string; createdAt: number; status: string; kind: string }>
+  workspaces?: string[]
 }
 
 /** 客户端会话服务（宿主注入）：binding 判可达，open 跳转。 */
@@ -118,7 +122,8 @@ function NoteCard(props: { note: NoteV } & Handlers): any {
       rc('span', { className: 'hb-badge' + (live ? ' live' : '') }, n.status),
       n.provenance === 'raw' ? rc('span', { className: 'hb-badge' }, '占位') : null,
       rc('span', { className: 'hb-title' }, n.title),
-      rc('span', { className: 'hb-id' }, n.id.slice(0, 8)),
+      n.kind === 'subagent' ? rc('span', { className: 'hb-badge' }, '↳🤖 子代理') : null,
+            rc('span', { className: 'hb-id' }, n.id.slice(0, 8)),
     ),
     open &&
       rc('div', null, [
@@ -175,14 +180,14 @@ function TimelineView(props: { state: StateV; pickedId: string | null; onPick(id
               {
                 key: n.id,
                 className:
-                  'hb-tl-card' + (n.status === '已归档' ? ' archived' : '') +
+                  'hb-tl-card' + (n.status === '已归档' ? ' archived' : '') + (n.kind === 'subagent' ? ' sub' : '') +
                   (props.pickedId === n.id ? ' picked' : ''),
                 style: { left: pos(n.createdAt) + '%' },
                 title: `${n.title}\n${fmt(n.createdAt)} · ${n.status} · 点击查看全文`,
                 onClick: () => props.onPick(n.id),
               },
               [
-                rc('div', { className: 't' }, n.title.slice(0, 22)),
+                rc('div', { className: 't' }, (n.kind === 'subagent' ? '↳' : '') + n.title.slice(0, 20)),
                 rc('div', { className: 'd' }, fmt(n.createdAt)),
               ],
             ),
@@ -319,6 +324,20 @@ export function BoardApp(props: { sessions?: SessionsApi }): any {
     state.notes.length > 0 && matchedCount === 0 && orphanNotes.length === 0 &&
       rc('div', { key: 'diag', className: 'hb-empty', style: { color: '#e5484d' } },
         '自检异常：有记录但分组为空。原始：' + JSON.stringify(state).slice(0, 300)),
+    (state.unnoted?.length ?? 0) > 0 &&
+      rc('details', { key: 'unnoted', style: { marginTop: '12px' } }, [
+        rc('summary', { key: 's', style: { cursor: 'pointer', fontSize: '12px', opacity: 0.8 } },
+          `🗒️ 近期未生成交接条的对话（${state.unnoted!.length}）——点「⚡生成」入板`),
+        ...state.unnoted!.map((u) =>
+          rc('div', { key: u.sessionId, style: { display: 'flex', gap: '8px', alignItems: 'center', padding: '4px 0', borderBottom: '1px dashed color-mix(in srgb, currentColor 15%, transparent)' } }, [
+            rc('span', { key: 'b', className: 'hb-badge' }, u.status),
+            rc('span', { key: 'k', style: { opacity: 0.7 } }, u.kind === 'subagent' ? '🤖' : '💬'),
+            rc('span', { key: 'i', className: 'hb-id' }, u.sessionId.slice(0, 8)),
+            rc('span', { key: 'd', style: { flex: 1, fontSize: '11px' } }, fmt(u.createdAt)),
+            rc('button', { key: 'g', className: 'hb-btn', disabled: busy,
+              onClick: () => onGenerate(u.sessionId) }, '⚡ 生成交接条'),
+          ])),
+      ]]),
     rc('details', { key: 'help', style: { marginTop: '16px', opacity: 0.88 } }, [
       rc('summary', { key: 's', style: { cursor: 'pointer', fontSize: '12px' } }, '❓ 使用说明'),
       rc('div', { key: 'b', style: { fontSize: '12px', lineHeight: '1.8' } }, [
