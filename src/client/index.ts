@@ -1,7 +1,7 @@
 /**
  * @dsh-external/dsh-handoff-board — client：主区视图（conversation.view 插槽）。
- * 与「对话」「轨迹」并列切换、同尺寸同位置——不是弹窗、不是全屏、不占侧栏。
- * 内部双视图：📋 列表 / 🧭 时间线（纯 CSS 泳道）。
+ * 与「对话」「轨迹」并列切换、同尺寸同位置。内部双视图：📋 列表 / 🧭 时间线泳道。
+ * 交互：点卡片展开全文；📂 打开原对话；🔗 接续后自动跳转新会话（轮询 binding）。
  */
 import { createElement as rc, useEffect, useState } from 'react'
 
@@ -28,6 +28,12 @@ interface StateV {
   ok: boolean
   threads: ThreadV[]
   notes: NoteV[]
+}
+
+/** 客户端会话服务（宿主注入）：binding 判可达，open 跳转。 */
+interface SessionsApi {
+  binding(sessionId: string): unknown
+  open(sessionId: string): void
 }
 
 async function getJSON<T>(path: string): Promise<T> {
@@ -61,6 +67,7 @@ function injectStyles(): void {
 .hb-note:hover{background:color-mix(in srgb,currentColor 7%,transparent)}
 .hb-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .hb-badge{font-size:11px;padding:1px 8px;border-radius:9px;border:1px solid currentColor;opacity:.85}
+.hb-badge.live{background:rgba(46,160,67,.15);border-color:rgba(46,160,67,.6)}
 .hb-title{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hb-id{font-family:monospace;font-size:11px;opacity:.55}
 .hb-body{max-height:46vh;overflow:auto;background:color-mix(in srgb,currentColor 6%,transparent);border-radius:6px;padding:10px;white-space:pre-wrap;font-size:12.5px;line-height:1.55;margin-top:8px}
@@ -73,14 +80,14 @@ function injectStyles(): void {
 .hb-empty{opacity:.6;padding:32px;text-align:center}
 /* ── 时间线泳道 ── */
 .hb-tl-rowlabel{font-size:11px;opacity:.75;margin:10px 0 2px;font-weight:600}
-.hb-tl-lane{position:relative;height:60px;border-bottom:1px dashed color-mix(in srgb,currentColor 20%,transparent);margin:0 90px 2px}
+.hb-tl-lane{position:relative;height:64px;border-bottom:1px dashed color-mix(in srgb,currentColor 20%,transparent);margin:0 90px 2px}
 .hb-tl-card{position:absolute;top:9px;transform:translateX(-50%);max-width:150px;border:1px solid currentColor;border-radius:7px;padding:4px 8px;font-size:11px;cursor:pointer;line-height:1.35;background:color-mix(in srgb,currentColor 5%,transparent)}
-.hb-tl-card:hover{background:color-mix(in srgb,currentColor 12%,transparent)}
-.hb-tl-card .t{font-weight:600;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hb-tl-card:hover{background:color-mix(in srgb,currentColor 14%,transparent)}
+.hb-tl-card.picked{outline:2px solid currentColor}
+.hb-tl-card .t{font-weight:600;max-width:136px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hb-tl-card .d{opacity:.6;font-size:10px}
 .hb-tl-card.archived{opacity:.55;border-style:dashed}
-.hb-tl-axis{display:flex;justify-content:space-between;font-size:10px;opacity:.55;margin-top:2px}
-.hb-tip{opacity:.5;font-size:11px;margin-top:10px}`
+.hb-tl-axis{display:flex;justify-content:space-between;font-size:10px;opacity:.55;margin-top:2px}`
   document.head.appendChild(style)
 }
 
@@ -88,26 +95,27 @@ function fmt(ms: number): string {
   return new Date(ms).toISOString().slice(5, 16).replace('T', ' ')
 }
 
-function NoteCard(props: {
-  onOpen: (sessionId: string) => void
-  note: NoteV
+interface Handlers {
+  sessions?: SessionsApi
   busy: boolean
-  onContinue: (id: string) => void
-  onGenerate: (sessionId: string) => void
-}): any {
-  const [open, setOpen] = useState(false)
+  expandedId: string | null
+  onToggle(id: string): void
+  onOpen(sessionId: string): void
+  onContinue(noteId: string): void
+  onGenerate(sessionId: string): void
+}
+
+function NoteCard(props: { note: NoteV } & Handlers): any {
   const n = props.note
-  const badgeStyle =
-    n.status === '进行中'
-      ? { background: 'rgba(46,160,67,.15)', borderColor: 'rgba(46,160,67,.6)' }
-      : { opacity: 0.7 }
+  const open = props.expandedId === n.id
+  const live = n.status === '进行中'
   return rc(
     'div',
-    { className: 'hb-note', onClick: () => setOpen((v) => !v) },
+    { className: 'hb-note', onClick: () => props.onToggle(n.id) },
     rc(
       'div',
       { className: 'hb-meta' },
-      rc('span', { className: 'hb-badge', style: badgeStyle }, n.status),
+      rc('span', { className: 'hb-badge' + (live ? ' live' : '') }, n.status),
       n.provenance === 'raw' ? rc('span', { className: 'hb-badge' }, '占位') : null,
       rc('span', { className: 'hb-title' }, n.title),
       rc('span', { className: 'hb-id' }, n.id.slice(0, 8)),
@@ -142,15 +150,15 @@ function NoteCard(props: {
   )
 }
 
-/** 时间线：线程一行泳道，条按 createdAt 定位。 */
-function TimelineView(props: { state: StateV }): any {
+/** 时间线：线程一行泳道，卡片按 createdAt 定位；点击跳回列表并展开。 */
+function TimelineView(props: { state: StateV; pickedId: string | null; onPick(id: string): void }): any {
   const notes = props.state.notes
   if (notes.length === 0) return null
   const times = notes.map((n) => n.createdAt)
   const min = Math.min(...times)
   const max = Math.max(...times)
   const span = Math.max(max - min, 60_000)
-  const pos = (t: number): number => 4 + ((t - min) / span) * 92
+  const pos = (t: number): number => 8 + ((t - min) / span) * 84
 
   return rc('div', null, [
     ...props.state.threads.map((t) => {
@@ -166,9 +174,12 @@ function TimelineView(props: { state: StateV }): any {
               'div',
               {
                 key: n.id,
-                className: 'hb-tl-card' + (n.status === '已归档' ? ' archived' : ''),
+                className:
+                  'hb-tl-card' + (n.status === '已归档' ? ' archived' : '') +
+                  (props.pickedId === n.id ? ' picked' : ''),
                 style: { left: pos(n.createdAt) + '%' },
-                title: `${n.title}\n${fmt(n.createdAt)} · ${n.status}`,
+                title: `${n.title}\n${fmt(n.createdAt)} · ${n.status} · 点击查看全文`,
+                onClick: () => props.onPick(n.id),
               },
               [
                 rc('div', { className: 't' }, n.title.slice(0, 22)),
@@ -183,22 +194,18 @@ function TimelineView(props: { state: StateV }): any {
       rc('span', null, fmt(min)),
       rc('span', null, fmt(max)),
     ]),
-    rc('details', { key: 'help', style: { marginTop: '16px', opacity: 0.88 } }, [
-      rc('summary', { key: 's', style: { cursor: 'pointer', fontSize: '12px' } }, '❓ 使用说明'),
-      rc('div', { key: 'b', style: { fontSize: '12px', lineHeight: '1.8' } }, [
-        rc('div', null, '📋 列表：点行展开六段全文；📂 打开原对话跳回来源会话；🔗 开新对话接续（自动跳转并注入全文）；✍️ 补写交接条为该会话重新生成'),
-        rc('div', null, '🧭 时间线：一行一个项目线程，卡片位置＝发生时间，虚线框＝已归档；悬停看完整标题'),
-        rc('div', null, '🟢 进行中 / ⚪ 已归档 徽章跟随来源会话实时状态；↻ 手动刷新读最新账本'),
-      ]),
-    ]),
+    rc('p', { className: 'hb-tip' }, '点击气泡 → 跳到列表并展开该条全文。'),
   ])
 }
 
-export function BoardApp(): any {
+export function BoardApp(props: { sessions?: SessionsApi }): any {
   injectStyles()
+  const sessions = props.sessions
   const [state, setState] = useState<StateV | null>(null)
   const [busy, setBusy] = useState(false)
   const [view, setView] = useState<'list' | 'timeline'>('list')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
   const reload = async (): Promise<void> => {
     try {
       setState(await getJSON<StateV>('/state'))
@@ -206,12 +213,32 @@ export function BoardApp(): any {
   }
   useEffect(() => { void reload() }, [])
 
+  /** 等新会话在客户端列表就绪（最多 6s），然后跳转过去。 */
+  const waitAndOpen = async (sessionId: string): Promise<void> => {
+    if (!sessions) {
+      alert(`新会话已创建：${sessionId.slice(0, 13)}…（当前客户端无法自动跳转，请在列表中查找）`)
+      return
+    }
+    for (let i = 0; i < 12; i++) {
+      try {
+        if (sessions.binding(sessionId) !== undefined) break
+      } catch { /* 未就绪继续等 */ }
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    sessions.open(sessionId)
+  }
+
   const onContinue = async (noteId: string): Promise<void> => {
     setBusy(true)
     try {
       const r = await postJSON('/continue', { noteId })
-      alert(r.ok ? `已创建接续会话 ${String(r.newSessionId).slice(0, 13)}…\n交接条全文已注入为首条消息。` : '失败: ' + r.error)
-      if (r.ok) await reload()
+      if (!r.ok) {
+        alert('失败: ' + r.error)
+        return
+      }
+      await reload()
+      await waitAndOpen(r.newSessionId)
+      if (r.warning) alert('⚠️ ' + r.warning)
     } finally {
       setBusy(false)
     }
@@ -225,6 +252,13 @@ export function BoardApp(): any {
     } finally {
       setBusy(false)
     }
+  }
+  const onOpen = (sessionId: string): void => {
+    if (!sessions) {
+      alert('当前客户端未注入会话服务，无法跳转。')
+      return
+    }
+    sessions.open(sessionId)
   }
 
   if (!state?.ok) {
@@ -240,6 +274,11 @@ export function BoardApp(): any {
     const list = notesByThread.get(n.threadId) ?? []
     list.push(n)
     notesByThread.set(n.threadId, list)
+  }
+  const handlers: Handlers = {
+    sessions, busy, expandedId,
+    onToggle: (id) => setExpandedId(expandedId === id ? null : id),
+    onOpen, onContinue, onGenerate,
   }
 
   return rc('div', { className: 'hb-wrap' }, [
@@ -257,44 +296,57 @@ export function BoardApp(): any {
       ? rc('div', { key: 'empty', className: 'hb-empty' },
           '还没有交接条。在任意会话里敲 /handoff 生成第一条。')
       : view === 'timeline'
-        ? rc(TimelineView, { key: 'tl', state })
+        ? rc(TimelineView, { key: 'tl', state, pickedId: expandedId, onPick: (id: string) => { setExpandedId(id); setView('list') } })
         : state.threads.map((t) => {
             const list = notesByThread.get(t.id) ?? []
             if (list.length === 0) return null
             return rc('div', { key: t.id, className: 'hb-thread' }, [
               rc('h3', { key: 'h' }, `${t.title}`),
               ...list.map((n) =>
-                rc(NoteCard, { key: n.id, note: n, busy, onContinue, onGenerate }),
+                rc(NoteCard, { key: n.id, note: n, ...handlers }),
               ),
             ])
           }),
+    rc('details', { key: 'help', style: { marginTop: '16px', opacity: 0.88 } }, [
+      rc('summary', { key: 's', style: { cursor: 'pointer', fontSize: '12px' } }, '❓ 使用说明'),
+      rc('div', { key: 'b', style: { fontSize: '12px', lineHeight: '1.8' } }, [
+        rc('div', null, '📋 列表：点行展开六段全文；📂 打开原对话跳回来源会话；🔗 开新对话接续（自动跳转并注入全文）；✍️ 补写交接条为该会话重新生成一份新的（不覆盖旧条）。'),
+        rc('div', null, '🧭 时间线：一行一个项目线程，卡片位置＝发生时间；点气泡跳回列表并展开全文。交接条多了以后，这里用来看「什么时候、哪个线程活跃、哪里有断层」。'),
+        rc('div', null, '🟢 进行中 / ⚪ 已归档 徽章跟随来源会话实时状态；↻ 手动刷新读最新账本。'),
+      ]),
+    ]),
   ])
 }
+
 type ClientCtx = {
   effect(fn: () => (() => void) | void, tag?: string): void
   slots: {
     inject(name: string, register: () => unknown): void
     register(options: Record<string, unknown>, component: any): unknown
   }
+  sessions?: SessionsApi
 }
 
-export const inject = ['slots']
+export const inject = ['slots', 'sessions']
 
 export function apply(ctx: ClientCtx): void {
-  // 主区视图：与「对话」「轨迹」并列的切换页签。
-  // order=100 追加在轨迹(order=10)之后——用户要求排在最后，不插中间。
+  injectStyles()
+  // 主区视图：与「对话」「轨迹」并列的切换页签。order=100 排在轨迹之后。
   // 契约（照抄 ui-trajectory 标准写法）：register(描述符, React组件)，组件收 props 渲染。
   ctx.effect(() =>
     ctx.slots.inject('conversation.view', () =>
-      ctx.slots.register({
+      ctx.slots.register(
+        {
           name: 'conversation.view',
           id: 'handoff-board',
           order: 100,
+          label: () => '交接板',
           icon: (size?: number) => rc('span', { style: { fontSize: (size ?? 16) + 'px' } }, '📌'),
           component: BoardApp,
-          label: () => '交接板',
         },
-        BoardApp,
+        function BoardShell(): any {
+          return rc(BoardApp, { sessions: ctx.sessions })
+        },
       ),
     ),
     'handoff-board: view',
