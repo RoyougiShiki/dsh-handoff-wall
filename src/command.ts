@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { BoardDomain, NoteRow, ThreadRow } from './store.js'
-import { pathSlug } from './store.js'
+import { resolveProjectKey } from './store.js'
 import { buildWorkerSystem, validateSections } from './prompt.js'
 import { redact } from './redact.js'
 
@@ -84,9 +84,9 @@ export interface HandoffDeps {
 /** 六段全文入库；线程按项目聚合（一个 cwd 一条线）。 */
 export async function saveHandoff(
   domain: BoardDomain,
-  input: { sessionId: string; cwd: string | undefined; title: string; body: string; files: string[] },
+  input: { sessionId: string; parentSessionId?: string; cwd: string | undefined; title: string; body: string; files: string[] },
 ): Promise<{ note: NoteRow; thread: ThreadRow }> {
-  const projectKey = input.cwd ? pathSlug(input.cwd) : 'default'
+  const projectKey = resolveProjectKey(input.cwd)
   const threads = domain.table('threads')
   const notes = domain.table('notes')
 
@@ -106,7 +106,7 @@ export async function saveHandoff(
     id: randomUUID(),
     threadId: thread.id,
     sessionId: input.sessionId,
-    parentSessionId: '',
+    parentSessionId: input.parentSessionId ?? '',
     createdAt: Date.now(),
     title: input.title,
     body: input.body,
@@ -129,40 +129,84 @@ export async function generateHandoff(
 
   const route = deps.ctx.agentDefaultModel.currentSelection()
   const materialRedacted = redact(material.transcript)
-  let body = ''
-  const stream = deps.ctx.llm.stream({
-    provider: route.provider,
-    model: route.model,
-    system: buildWorkerSystem(),
-    messages: [
-      createUserMessage({
-        source: { kind: 'user' },
-        content: [{ type: 'text', text: `会话 ${sessionId} 的材料如下：\n\n${materialRedacted}` }],
-      }),
-    ],
-    temperature: 0,
-    reasoningEffort: ReasoningEffortId('off'),
-    maxTokens: WORKER_MAX_TOKENS,
-  })
-  const timeout = AbortSignal.timeout(WORKER_TIMEOUT_MS)
-  for await (const chunk of stream) {
-    if (timeout.aborted) throw new Error('工人摘要超时（120s）')
-    if (chunk.type === 'text-delta' && chunk.text) body += chunk.text
+
+  // 工人调用：带分块统计；空文本自动翻倍 maxTokens 重试一次（推理型路由兜底）
+  // 工人调用：全量分块遥测；空文本按 预算↑→指令强化→去effort参数 三段递进重试
+  const runWorker = async (attempt: {
+    maxTokens: number
+    directive?: string
+    withEffortOff?: boolean
+  }): Promise<{ body: string; stats: string }> => {
+    let text = ''
+    let reasonChars = 0
+    let textChunks = 0
+    const chunkTypes: Record<string, number> = {}
+    let firstNonText: string | undefined
+    let lastFinish: string | undefined
+    const stream = deps.ctx.llm.stream({
+      provider: route.provider,
+      model: route.model,
+      system: buildWorkerSystem(),
+      messages: [
+        createUserMessage({
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: (attempt.directive ? attempt.directive + '\n\n' : '') + `会话 ${sessionId} 的材料如下：\n\n${materialRedacted}` }],
+        }),
+      ],
+      temperature: 0,
+      ...(attempt.withEffortOff ? { reasoningEffort: ReasoningEffortId('off') } : {}),
+      maxTokens: attempt.maxTokens,
+    })
+    const timeout = AbortSignal.timeout(WORKER_TIMEOUT_MS)
+    for await (const chunk of stream) {
+      if (timeout.aborted) throw new Error(`工人摘要超时（${WORKER_TIMEOUT_MS / 1000}s）`)
+      const t = String((chunk as any).type ?? 'unknown')
+      chunkTypes[t] = (chunkTypes[t] ?? 0) + 1
+      if (t === 'text-delta') {
+        if ((chunk as any).text) { text += (chunk as any).text; textChunks += 1 }
+      } else if (t.includes('reasoning')) {
+        reasonChars += ((chunk as any).text ?? '').length
+      } else {
+        if (!firstNonText) firstNonText = JSON.stringify(chunk).slice(0, 300)
+        if (t.startsWith('finish')) lastFinish = JSON.stringify(chunk).slice(0, 300)
+      }
+    }
+    const hist = Object.entries(chunkTypes).map(([k, v]) => `${k}x${v}`).join(',') || '(零分块)'
+    const stats = `text块=${textChunks} 正文=${text.length}字 思考=${reasonChars}字 maxTokens=${attempt.maxTokens} effortOff=${!!attempt.withEffortOff} 分块[${hist}]${firstNonText ? ` 首个非文本=${firstNonText}` : ''}${lastFinish ? ` finish=${lastFinish}` : ''}`
+    return { body: text, stats }
   }
 
-    if (!body.trim()) {
-      throw new Error('工人没有返回任何文本——可能是该路由把额度全花在思考上，或调用失败。可重试或换模型路线。')
+  let body = ''
+  let lastStats = ''
+  const attempts = [
+    { maxTokens: WORKER_MAX_TOKENS, withEffortOff: true },
+    { maxTokens: WORKER_MAX_TOKENS * 3, withEffortOff: true, directive: '跳过一切思考/解释/前缀，直接以「## 任务目标」开头的 Markdown 正文作为全部输出。' },
+    { maxTokens: WORKER_MAX_TOKENS * 3, withEffortOff: false, directive: '跳过一切思考/解释/前缀，直接以「## 任务目标」开头的 Markdown 正文作为全部输出。' },
+  ]
+  for (const attempt of attempts) {
+    try {
+      const r = await runWorker(attempt)
+      lastStats = r.stats
+      body = r.body.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+      if (!body.trim()) continue
+      const check = validateSections(body)
+      if (check.ok) break
+      lastStats += ` 缺段=[${check.missing.join('、')}]`
+      body = ''
+    } catch (e) {
+      lastStats = `attempt异常: ${String(e).slice(0, 120)}`
+      body = ''
     }
-    const check = validateSections(body)
-    if (!check.ok) {
-      const head = body.slice(0, 160).replace(/\n/g, '⏎') || '(空)'
-      throw new Error(`工人输出缺少段落：${check.missing.join('、')}。原始输出前160字：${head}`)
-    }
+  }
+  if (!body.trim()) {
+    throw new Error(`工人三轮均未产出合格正文（${lastStats}）。建议：给该路由模型如实声明 contextWindow、或换非思考路线。`)
+  }
   body = redact(body)
 
   const title = (material.firstUserText || header.cwd || sessionId).replace(/\s+/g, ' ').slice(0, 60)
   const { note, thread } = await saveHandoff(deps.domain, {
     sessionId,
+    parentSessionId: (header as any).parentSession ?? '',
     cwd: header.cwd,
     title,
     body,

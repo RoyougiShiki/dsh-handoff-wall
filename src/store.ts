@@ -9,6 +9,8 @@
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 // 注意：@deepseek-ai/schemastery 是宿主 vendor 的 fork，storageDomain 用它做记录校验，
 // 必须与其同实例（build.sh 已做 npm 模式链接）。官方包均为 default 导入。
 import { z } from 'zod'
@@ -32,7 +34,7 @@ export interface NoteRow {
   /** 六段 md 全文 */
   body: string
   files: string[]
-  /** curated=正式交接；raw 预留给回填灰卡（v0.2） */
+  /** curated=正式交接；raw 预留给回填占位卡（v0.2） */
   provenance: 'curated' | 'raw'
 }
 
@@ -42,6 +44,18 @@ export function pathSlug(abs: string): string {
   s = s.replace(/^-+|-+$/g, '') || 'default'
   if (s.length > 200) s = s.slice(-199) + '-' + hash8(abs)
   return s
+}
+
+export function resolveProjectKey(cwd?: string): string {
+  if (!cwd) return 'default'
+  let dir = cwd
+  for (let i = 0; i < 12; i++) {
+    if (existsSync(join(dir, '.git'))) return pathSlug(dir)
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return pathSlug(cwd)
 }
 
 export function hash8(input: string): string {
