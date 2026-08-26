@@ -55,8 +55,7 @@ domain `handoff_board` v1，两张表：
 
 ### 5.5 视图（同一 storageDomain 两张皮）
 - **列表**（先做）：Tab 注册进 better-sidebar；线程分组 → 条目行（状态徽章 live/persisted 映射 进行中/已归档）→ 点开看六段全文 + 三按钮。
-- **时间线墙**（随后）：React Flow；每线程一行泳道、条按 createdAt 横向排布；卡片=标题/日期/状态/文件 chips；SSE 订阅 domain 变更增量刷新。
-
+- **时间线墙**（实现期修订）：纯 CSS 泳道——每线程一行、条按 createdAt 在时间轴上定位；不引入 React Flow，因为 MVP 的诉求是「排队看先后」而非自由摆放；自由拖拽与缩放留雾区美化。
 ## 6. 里程碑与验收
 
 M1 ✅ 存储域+命令 → M2 四工具+接续（本轮）→ M3 列表视图 → M4 时间线墙 → M5 验收全绿。
