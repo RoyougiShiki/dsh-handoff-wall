@@ -257,28 +257,77 @@ type SidebarCtx = {
   betterSidebar?: {
     registerTab(descriptor: Record<string, unknown>): () => void
   }
+  slots?: SlotsShape
 } & Record<string, unknown>
 
-export const inject = ['betterSidebar']
+export const inject = ['betterSidebar', 'slots']
+
+type SlotsShape = {
+  inject(name: string, register: () => unknown): void
+  register(desc: Record<string, unknown>): unknown
+}
+
+async function glance(): Promise<void> {
+  try {
+    const s = (await (await fetch(BASE + '/state')).json()) as StateV
+    if (!s.ok) throw new Error('state 异常')
+    const recent = s.notes
+      .slice(0, 3)
+      .map((n) => `· ${n.title}（${n.status}）`)
+      .join('\n')
+    alert(`📌 交接板：${s.notes.length} 条 / ${s.threads.length} 线程\n最近：\n${recent || '（空）'}`)
+  } catch (e) {
+    alert('交接板暂不可达：' + String(e).slice(0, 80))
+  }
+}
 
 export function apply(ctx: SidebarCtx): void {
   const bs = ctx.betterSidebar
-  if (!bs) {
-    console.warn('[dsh-handoff-board] 未安装 dsh-better-sidebar，交接板 Tab 不可用')
-    return
+  if (bs) {
+    ctx.effect(() =>
+      bs.registerTab({
+        id: 'handoff-board:wall',
+        title: () => '交接板',
+        icon: (size?: number) => rc('span', { style: { fontSize: (size ?? 16) + 'px' } }, '📌'),
+        order: 55,
+        single: true,
+        component: function BoardShell(): any {
+          return rc(BoardApp)
+        },
+      }),
+      'handoff-board: tab',
+    )
   }
-  ctx.effect(() =>
-    bs.registerTab({
-      id: 'handoff-board:wall',
-      title: () => '交接板',
-      icon: (size?: number) => rc('span', { style: { fontSize: (size ?? 16) + 'px' } }, '📌'),
-      order: 55,
-      single: true,
-      component: function BoardShell(): any {
-        return rc(BoardApp)
-      },
-    }),
-    'handoff-board: tab',
-  )
-  console.info('[dsh-handoff-board] client registered（交接板 Tab：列表+时间线）')
+
+  // 侧栏底部「📌 速览」：满足 slots 骨架契约，同时是个真功能
+  const slots = ctx.slots
+  if (slots) {
+    ctx.effect(() =>
+      slots.inject('sidebar.footer.action', () =>
+        slots.register({
+          name: 'sidebar.footer.action',
+          id: 'handoff-board:glance',
+          label: () => '交接板速览',
+          component: () => ({
+            render() {
+              const el = document.createElement('button')
+              el.textContent = '📌'
+              el.title = '交接板速览'
+              el.style.cssText =
+                'cursor:pointer;border:none;background:transparent;color:inherit;font-size:15px;padding:2px'
+              el.onclick = () => { void glance() }
+              return el
+            },
+          }),
+        }),
+      ),
+      'handoff-board: glance',
+    )
+  }
+
+  if (!bs && !slots) {
+    console.warn('[dsh-handoff-board] better-sidebar 与 slots 均不可用，client 无处落脚')
+  } else {
+    console.info('[dsh-handoff-board] client registered（Tab＋速览按钮）')
+  }
 }
