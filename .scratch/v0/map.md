@@ -23,15 +23,22 @@ Labels: wayfinder:map
 
 - [参考件侦察](issues/09-donor-repos-recon.md) — 四个插件的保留/拔除/改造清单与必避的坑已盘点完毕
 - [DSH 宿主服务面调研](issues/10-dsh-host-api-recon.md) — 最小 API 集全部可行，无缺项；仅两个配套注入需补
+- [命名与定位](issues/01-name-and-position.md) — 定名 dsh-handoff-board；定位采用技术版一句话
+- [生命周期](issues/02-lifecycle-states.md) — 不自建状态，直接同步 DSH 会话归档标记；归档按钮删除
+- [存储位置](issues/03-store-location-keying.md) — 全进 storageDomain 单库、正文入表；md 文件夹方案放弃
+- [模板与脱敏](issues/05-template-and-redaction.md) — 六段合并版定稿；13 条脱敏正则三时机执行
+- [回填时机](issues/07-backfill-interaction.md) — v0.1 不做，进雾区（纯墙面装饰）
 
 ## Not yet specified
 
-- doc-atlas 三档握手的时机与形态（第〇档配置可能提前到建库当天）
+- doc-atlas 握手改道：存储全在官方账本后无目录可扫，日后需要时走「导出 md 目录」命令再配知识面
 - 画布自动布局算法细节（线程分行、时间轴刻度、缩放）
 - 入仓归档「毕业」机制（活跃层留 home、毕业快照选择性入仓——位置是变量）
 - 多项目聚合总览视图
 - 细节与美化：空状态、错误态、快捷键、动画
 - 打包与本地分发形态（dev_install/link 之外的正式安装方式）
+
+- 灰卡回填（v0.2 候选）：机械占位卡补时间断层，纯墙面装饰
 
 ## Out of scope
 
