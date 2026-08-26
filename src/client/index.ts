@@ -208,7 +208,7 @@ export function BoardApp(props: { sessions?: SessionsApi }): any {
 
   const reload = async (): Promise<void> => {
     try {
-      setState(await getJSON<StateV>('/state'))
+      setState(await getJSON<StateV>('/state?t=' + Date.now()))
     } catch { /* 宿主未就绪时静默 */ }
   }
   useEffect(() => { void reload() }, [])
@@ -269,11 +269,16 @@ export function BoardApp(props: { sessions?: SessionsApi }): any {
     )
   }
 
+  const threadIds = new Set(state.threads.map((t) => t.id))
   const notesByThread = new Map<string, NoteV[]>()
+  const orphanNotes: NoteV[] = []
   for (const n of state.notes) {
+    if (!threadIds.has(n.threadId)) { orphanNotes.push(n); continue }
     const list = notesByThread.get(n.threadId) ?? []
     list.push(n)
+    notesByThread.set(n.threadId, list)
   }
+  const matchedCount = [...notesByThread.values()].reduce((a, l) => a + l.length, 0)
   const handlers: Handlers = {
     sessions, busy, expandedId,
     onToggle: (id) => setExpandedId(expandedId === id ? null : id),
@@ -306,6 +311,14 @@ export function BoardApp(props: { sessions?: SessionsApi }): any {
               ),
             ])
           }),
+    orphanNotes.length > 0 &&
+      rc('div', { key: 'orph', className: 'hb-thread' }, [
+        rc('h3', { key: 'h' }, '⚠️ 未归组条目（数据自检）'),
+        ...orphanNotes.map((n) => rc(NoteCard, { key: n.id, note: n, ...handlers })),
+      ]),
+    state.notes.length > 0 && matchedCount === 0 && orphanNotes.length === 0 &&
+      rc('div', { key: 'diag', className: 'hb-empty', style: { color: '#e5484d' } },
+        '自检异常：有记录但分组为空。原始：' + JSON.stringify(state).slice(0, 300)),
     rc('details', { key: 'help', style: { marginTop: '16px', opacity: 0.88 } }, [
       rc('summary', { key: 's', style: { cursor: 'pointer', fontSize: '12px' } }, '❓ 使用说明'),
       rc('div', { key: 'b', style: { fontSize: '12px', lineHeight: '1.8' } }, [
