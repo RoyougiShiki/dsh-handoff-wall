@@ -182,6 +182,7 @@ function TimelineView(props: { state: StateV }): any {
 }
 
 export function BoardApp(): any {
+  injectStyles()
   const [state, setState] = useState<StateV | null>(null)
   const [busy, setBusy] = useState(false)
   const [view, setView] = useState<'list' | 'timeline'>('list')
