@@ -397,8 +397,7 @@ export function apply(ctx: ClientCtx): void {
   // 契约（照抄 ui-trajectory 标准写法）：register(描述符, React组件)，组件收 props 渲染。
   ctx.effect(() =>
     ctx.slots.inject('conversation.view', () =>
-      ctx.slots.register(
-        {
+      ctx.slots.register({
           name: 'conversation.view',
           id: 'handoff-board',
           order: 100,
