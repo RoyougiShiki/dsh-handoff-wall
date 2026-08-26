@@ -28,6 +28,9 @@ Labels: wayfinder:map
 - [存储位置](issues/03-store-location-keying.md) — 全进 storageDomain 单库、正文入表；md 文件夹方案放弃
 - [模板与脱敏](issues/05-template-and-redaction.md) — 六段合并版定稿；13 条脱敏正则三时机执行
 - [回填时机](issues/07-backfill-interaction.md) — v0.1 不做，进雾区（纯墙面装饰）
+- [字段级schema](issues/04-index-schema.md) — threads/notes 两表九字段定稿；lifecycle 不存库实时映射
+- [触发面与工具](issues/06-triggers-and-tools.md) — /handoff 单阶段；三按钮；四工具签名；接续链修三bug版
+- [MVP范围与验收](issues/08-mvp-scope-acceptance.md) — 全量含画布；6步验收脚本；M1-M5 里程碑
 
 ## Not yet specified
 

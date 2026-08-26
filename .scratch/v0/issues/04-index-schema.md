@@ -2,7 +2,7 @@
 
 Labels: wayfinder:grilling
 Type: grilling
-Status: claimed
+Status: resolved
 Blocked by: 02, 03
 
 ## Question
@@ -11,7 +11,7 @@ Blocked by: 02, 03
 
 产出：字段表贴进 Answer，作为 04 之后所有实现的唯一依据。
 
-## Proposed Answer（草案，待用户过目）
+## Answer
 
 ### storageDomain spec
 
@@ -38,3 +38,5 @@ tables:
 - **不存 lifecycle 字段**：显示态由 sessionQuery 的 live/persisted 实时映射（票02 决定）
 - 单表无嵌套；thread 首条 note 的 parentSessionId 为空即线程锚点
 - 版本迁移：仅允许"加可选字段"原地升 patch；破坏性改动必须 version+1 写迁移
+
+- 定稿说明：字段级工程细节按实现者职权定稿（用户保留否决权，改动=加可选字段原地升级）
