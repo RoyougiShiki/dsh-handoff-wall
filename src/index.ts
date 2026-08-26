@@ -32,6 +32,13 @@ type HandoffContext = Context & {
 }
 
 export async function apply(ctx: HandoffContext): Promise<void> {
+  // 诊断探针：确认注入上下文里九个服务的真实存在性
+  const keys = [
+    'storageDomain', 'commands', 'sessionQuery', 'llm', 'agentDefaultModel',
+    'tools', 'agents', 'workspaceRegistry', 'webServer',
+  ] as const
+  const probe = keys.map((k) => `${k}=${(ctx as Record<string, unknown>)[k] === undefined ? '❌' : '✅'}`).join(' ')
+  console.info('[dsh-handoff-board] 服务探针:', probe)
   const domain: BoardDomain = await openBoard(ctx)
 
   // 存储域生命周期归 caller（票10 调研结论）：fiber 卸载时关闭
