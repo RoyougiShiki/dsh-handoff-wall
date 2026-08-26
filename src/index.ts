@@ -37,7 +37,7 @@ export async function apply(ctx: HandoffContext): Promise<void> {
     'storageDomain', 'commands', 'sessionQuery', 'llm', 'agentDefaultModel',
     'tools', 'agents', 'workspaceRegistry', 'webServer',
   ] as const
-  const probe = keys.map((k) => `${k}=${(ctx as Record<string, unknown>)[k] === undefined ? '❌' : '✅'}`).join(' ')
+  const probe = keys.map((k) => `${k}=${(ctx as unknown as Record<string, unknown>)[k] === undefined ? '❌' : '✅'}`).join(' ')
   console.info('[dsh-handoff-board] 服务探针:', probe)
   const domain: BoardDomain = await openBoard(ctx)
 
