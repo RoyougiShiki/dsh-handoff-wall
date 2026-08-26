@@ -26,7 +26,6 @@ export async function continueWithNote(
   domain: BoardDomain,
   noteId: string,
 ): Promise<{ newSessionId: string; note: NoteRow }> {
-  const note = domain.table('notes').get(noteId)
   const notes = domain.table('notes')
   let note = notes.get(noteId) as NoteRow | undefined
   if (!note && noteId.length < 36) {
