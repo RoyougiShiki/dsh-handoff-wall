@@ -49,8 +49,9 @@ export function mountBoardRoutes(ctx: RouteDeps['ctx'], domain: BoardDomain): ()
         }
       })
     })
+  const disposers: Array<() => void> = []
   const register = (path: string, handler: (req: IncomingMessage, res: ServerResponse) => unknown): void => {
-    ctx.webServer.register({ kind: 'exact', path, handler })
+    disposers.push(ctx.webServer.register({ kind: 'exact', path, handler }))
   }
 
   // ── 状态：线程 + 条目（含实时归档态映射）──
@@ -108,5 +109,6 @@ export function mountBoardRoutes(ctx: RouteDeps['ctx'], domain: BoardDomain): ()
     })
   }))
 
-  return () => { /* exact 路由随 fiber 卸载由宿主回收 */ }
+  // webServer.register 的反注册函数必须逐个保留——否则卸载后路由残留，重装即 duplicate 冲突
+  return () => disposers.forEach((d) => d())
 }
