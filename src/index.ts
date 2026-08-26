@@ -8,6 +8,7 @@
 import type { Context } from 'cordis'
 import { openBoard, type BoardDomain } from './store.js'
 import { createHandoffCommand } from './command.js'
+import { registerBoardTools } from './tools.js'
 
 export const name = 'dsh-handoff-board'
 
@@ -15,14 +16,17 @@ export const name = 'dsh-handoff-board'
  * 服务依赖：storageDomain 必须先于本插件挂载（inject 保证次序）。
  * agents/workspaceRegistry 留给 M2 会话接续功能再加，最小化 M1 失败面。
  */
-export const inject = ['storageDomain', 'commands', 'sessionQuery', 'llm', 'agentDefaultModel']
+export const inject = ['storageDomain', 'commands', 'sessionQuery', 'llm', 'agentDefaultModel', 'tools', 'agents', 'workspaceRegistry']
 
 type HandoffContext = Context & {
   storageDomain: { open(spec: unknown): Promise<unknown> }
   commands: { register(def: unknown): () => void }
-  sessionQuery: { readSurface(id: string): Promise<unknown> }
+  sessionQuery: { readSurface(id: string): Promise<unknown>; listSessions(signal?: AbortSignal): Promise<unknown[]> }
   llm: Parameters<typeof createHandoffCommand>[0]['ctx']['llm']
   agentDefaultModel: { currentSelection(): { provider: string; model: string } }
+  tools: { register(def: unknown): () => void }
+  agents: { create(options: unknown): Promise<unknown> }
+  workspaceRegistry: { resolveByPath(path: string): Promise<unknown> }
 }
 
 export async function apply(ctx: HandoffContext): Promise<void> {
@@ -45,5 +49,17 @@ export async function apply(ctx: HandoffContext): Promise<void> {
     ),
   )
 
-  ctx.logger?.info?.('[dsh-handoff-board] 交接板就绪：/handoff 已注册，账本 handoff_board 已打开')
+  // AI 四件套（M2）：board / read_handoff / write_handoff / who_else
+  ctx.effect(() =>
+    registerBoardTools({
+      ctx: {
+        sessionQuery: ctx.sessionQuery as never,
+        llm: ctx.llm,
+        agentDefaultModel: ctx.agentDefaultModel,
+      },
+      domain,
+    }),
+  )
+
+  ctx.logger?.info?.('[dsh-handoff-board] 交接板就绪：/handoff 已注册，账本 handoff_board 已打开，四工具已上线')
 }
