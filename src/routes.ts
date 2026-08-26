@@ -83,8 +83,6 @@ export function mountBoardRoutes(ctx: RouteDeps['ctx'], domain: BoardDomain): ()
         provenance: n.provenance,
         parentSession: (sessionMap.get(n.sessionId)?.header?.parentSession ?? '').slice(0, 8),
         kind: (sessionMap.get(n.sessionId)?.header?.origin === 'subagent') ? 'subagent' : 'main',
-        status: statusOf(n.sessionId),
-        kind: (sessionMap.get(n.sessionId)?.header?.origin === 'subagent') ? 'subagent' : 'main',
       }))
         const notedSessions = new Set(notes.map((n: any) => n.sessionId))
     const unnoted = [...sessionMap.values()]
