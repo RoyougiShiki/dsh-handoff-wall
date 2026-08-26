@@ -150,10 +150,14 @@ export async function generateHandoff(
     if (chunk.type === 'text-delta' && chunk.text) body += chunk.text
   }
 
-  const check = validateSections(body)
-  if (!check.ok) {
-    throw new Error(`工人输出缺少段落：${check.missing.join('、')}——已放弃入库，可重试`)
-  }
+    if (!body.trim()) {
+      throw new Error('工人没有返回任何文本——可能是该路由把额度全花在思考上，或调用失败。可重试或换模型路线。')
+    }
+    const check = validateSections(body)
+    if (!check.ok) {
+      const head = body.slice(0, 160).replace(/\n/g, '⏎') || '(空)'
+      throw new Error(`工人输出缺少段落：${check.missing.join('、')}。原始输出前160字：${head}`)
+    }
   body = redact(body)
 
   const title = (material.firstUserText || header.cwd || sessionId).replace(/\s+/g, ' ').slice(0, 60)

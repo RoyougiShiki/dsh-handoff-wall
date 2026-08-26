@@ -33,8 +33,11 @@ export function buildWorkerSystem(): string {
   ].join('\n')
 }
 
-/** 校验工人输出是否包含全部六段（顺序不强制倒序检查，出现即可，缺失即废稿）。 */
+/** 校验工人输出是否包含全部六段（容忍 2~4 级标题与行首空白；代码围栏剔除）。 */
 export function validateSections(body: string): { ok: boolean; missing: string[] } {
-  const missing = SIX_SECTIONS.filter((s) => !body.includes('## ' + s))
+  const normalized = body.replace(/```[a-z]*/gi, '')
+  const missing = SIX_SECTIONS.filter(
+    (s) => !new RegExp(`^\\s*#{2,4}\\s*${s}`, 'm').test(normalized),
+  )
   return { ok: missing.length === 0, missing }
 }
