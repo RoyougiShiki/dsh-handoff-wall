@@ -27,8 +27,13 @@ export async function continueWithNote(
   noteId: string,
 ): Promise<{ newSessionId: string; note: NoteRow }> {
   const note = domain.table('notes').get(noteId)
+  const notes = domain.table('notes')
+  let note = notes.get(noteId) as NoteRow | undefined
+  if (!note && noteId.length < 36) {
+    const hit = [...notes.entries()].find(([k]) => k.startsWith(noteId))
+    note = hit?.[1] as NoteRow | undefined
+  }
   if (!note) throw new Error(`交接条不存在: ${noteId}`)
-
   // 来源会话 cwd → 新会话落同一工作区
   const srcSurface = await deps.ctx.sessionQuery.readSurface(note.sessionId).catch(() => null)
   const cwd: string | undefined = srcSurface?.session?.cwd
