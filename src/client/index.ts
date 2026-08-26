@@ -4,7 +4,6 @@
  * 内部双视图：📋 列表 / 🧭 时间线（纯 CSS 泳道）。
  */
 import { createElement as rc, useEffect, useState } from 'react'
-import { createRoot } from 'react-dom/client'
 
 const BASE = '/handoff-board'
 
@@ -257,38 +256,34 @@ export function BoardApp(): any {
           }),
   ])
 }
-
 type ClientCtx = {
   effect(fn: () => (() => void) | void, tag?: string): void
   slots: {
     inject(name: string, register: () => unknown): void
-    register(desc: Record<string, unknown>): unknown
+    register(options: Record<string, unknown>, component: any): unknown
   }
 }
 
 export const inject = ['slots']
 
 export function apply(ctx: ClientCtx): void {
-  // 主区视图：与「对话」「轨迹」并列切换（conversation.view 插槽）
+  // 主区视图：与「对话」「轨迹」并列的切换页签。
+  // order=100 追加在轨迹(order=10)之后——用户要求排在最后，不插中间。
+  // 契约（照抄 ui-trajectory 标准写法）：register(描述符, React组件)，组件收 props 渲染。
   ctx.effect(() =>
     ctx.slots.inject('conversation.view', () =>
-      ctx.slots.register({
-        name: 'conversation.view',
-        id: 'handoff-board:view',
-        label: () => '交接板',
-        icon: (size?: number) => rc('span', { style: { fontSize: (size ?? 16) + 'px' } }, '📌'),
-        component: () => ({
-          render() {
-            const host = document.createElement('div')
-            host.style.height = '100%'
-            const root = createRoot(host)
-            root.render(rc(BoardApp))
-            return host
-          },
-        }),
-      }),
+      ctx.slots.register(
+        {
+          name: 'conversation.view',
+          id: 'handoff-board',
+          order: 100,
+          label: () => '交接板',
+          icon: (size?: number) => rc('span', { style: { fontSize: (size ?? 16) + 'px' } }, '📌'),
+        },
+        BoardApp,
+      ),
     ),
     'handoff-board: view',
   )
-  console.info('[dsh-handoff-board] client registered（主区视图：交接板）')
+  console.info('[dsh-handoff-board] client registered（主区视图：交接板，order=100）')
 }
