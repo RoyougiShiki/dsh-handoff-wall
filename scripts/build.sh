@@ -67,6 +67,13 @@ link_dep "@deepseek-ai/dsh-llm" packages/llm/llm
 link_dep "@deepseek-ai/dsh-system-prompt" packages/core/system-prompt
 link_dep "@types/node" node_modules/@types/node
 
+# npm 安装版布局补充链接（monorepo 源码检出自带完整依赖，无需此段）
+if [ "${MODE:-}" = "npm" ]; then
+  link_dep "@deepseek-ai/dsh-storage-domain" packages/x
+  link_dep "@deepseek-ai/schemastery" vendor/schemastery
+  link_dep "zod" packages/x
+fi
+
 TSC="$CHECKOUT/node_modules/.bin/tsc"
 if [ ! -x "$TSC" ] && [ ! -f "$TSC.cmd" ]; then TSC="./node_modules/.bin/tsc"; fi
 "$TSC" -p tsconfig.json
