@@ -66,6 +66,7 @@ export async function apply(ctx: HandoffContext): Promise<void> {
           sessionQuery: ctx.sessionQuery as never,
           llm: ctx.llm,
           agentDefaultModel: ctx.agentDefaultModel,
+          tools: ctx.tools,
         },
         domain,
       }),
