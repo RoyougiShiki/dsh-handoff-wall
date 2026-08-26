@@ -76,6 +76,7 @@ export interface HandoffDeps {
       }): AsyncIterable<{ type: string; text?: string }>
     }
     agentDefaultModel: { currentSelection(): { provider: string; model: string } }
+    tools: { register(def: unknown): () => void }
   }
   domain: BoardDomain
 }
