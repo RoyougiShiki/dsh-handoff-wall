@@ -117,6 +117,14 @@ export async function saveHandoff(
   return { note, thread }
 }
 
+/** 标题派生：去开头命令、折叠长路径为 …/末段、按长度截断。 */
+function deriveTitle(firstUserText: string): string {
+  let t = firstUserText.trim().replace(/^\/\S+\s*/, '')
+  t = t.replace(/[\w.\-/]+\/([\w.\-]+)/g, '…/$1').replace(/\s+/g, ' ')
+  if (t.length > 48) t = t.slice(0, 46) + '…'
+  return t || '未命名交接条'
+}
+
 /** 生成核心：命令与 write_handoff 工具共用同一引擎（三入口一引擎）。 */
 export async function generateHandoff(
   deps: HandoffDeps,
@@ -203,7 +211,7 @@ export async function generateHandoff(
   }
   body = redact(body)
 
-  const title = (material.firstUserText || header.cwd || sessionId).replace(/\s+/g, ' ').slice(0, 60)
+  const title = deriveTitle(material.firstUserText)
   const { note, thread } = await saveHandoff(deps.domain, {
     sessionId,
     parentSessionId: (header as any).parentSession ?? '',

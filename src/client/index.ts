@@ -73,8 +73,8 @@ function injectStyles(): void {
 .hb-empty{opacity:.6;padding:32px;text-align:center}
 /* ── 时间线泳道 ── */
 .hb-tl-rowlabel{font-size:11px;opacity:.75;margin:10px 0 2px;font-weight:600}
-.hb-tl-lane{position:relative;height:60px;border-bottom:1px dashed color-mix(in srgb,currentColor 20%,transparent);margin-bottom:2px}
-.hb-tl-card{position:absolute;top:9px;transform:translateX(-50%);max-width:190px;border:1px solid currentColor;border-radius:7px;padding:4px 8px;font-size:11px;cursor:pointer;line-height:1.35;background:color-mix(in srgb,currentColor 5%,transparent)}
+.hb-tl-lane{position:relative;height:60px;border-bottom:1px dashed color-mix(in srgb,currentColor 20%,transparent);margin:0 90px 2px}
+.hb-tl-card{position:absolute;top:9px;transform:translateX(-50%);max-width:150px;border:1px solid currentColor;border-radius:7px;padding:4px 8px;font-size:11px;cursor:pointer;line-height:1.35;background:color-mix(in srgb,currentColor 5%,transparent)}
 .hb-tl-card:hover{background:color-mix(in srgb,currentColor 12%,transparent)}
 .hb-tl-card .t{font-weight:600;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hb-tl-card .d{opacity:.6;font-size:10px}
@@ -89,6 +89,7 @@ function fmt(ms: number): string {
 }
 
 function NoteCard(props: {
+  onOpen: (sessionId: string) => void
   note: NoteV
   busy: boolean
   onContinue: (id: string) => void
@@ -124,6 +125,10 @@ function NoteCard(props: {
             n.files.length > 14 ? rc('span', { className: 'hb-chip' }, `+${n.files.length - 14}`) : null,
           ),
         rc('div', { key: 'act', className: 'hb-actions', onClick: (e: Event) => e.stopPropagation() }, [
+          rc('button', {
+            key: 'open', className: 'hb-btn',
+            onClick: () => props.onOpen(n.sessionId),
+          }, '📂 打开原对话'),
           rc('button', {
             key: 'cont', className: 'hb-btn', disabled: props.busy,
             onClick: () => props.onContinue(n.id),
@@ -177,6 +182,14 @@ function TimelineView(props: { state: StateV }): any {
     rc('div', { className: 'hb-tl-axis' }, [
       rc('span', null, fmt(min)),
       rc('span', null, fmt(max)),
+    ]),
+    rc('details', { key: 'help', style: { marginTop: '16px', opacity: 0.88 } }, [
+      rc('summary', { key: 's', style: { cursor: 'pointer', fontSize: '12px' } }, '❓ 使用说明'),
+      rc('div', { key: 'b', style: { fontSize: '12px', lineHeight: '1.8' } }, [
+        rc('div', null, '📋 列表：点行展开六段全文；📂 打开原对话跳回来源会话；🔗 开新对话接续（自动跳转并注入全文）；✍️ 补写交接条为该会话重新生成'),
+        rc('div', null, '🧭 时间线：一行一个项目线程，卡片位置＝发生时间，虚线框＝已归档；悬停看完整标题'),
+        rc('div', null, '🟢 进行中 / ⚪ 已归档 徽章跟随来源会话实时状态；↻ 手动刷新读最新账本'),
+      ]),
     ]),
   ])
 }
