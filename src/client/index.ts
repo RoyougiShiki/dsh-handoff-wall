@@ -1,7 +1,7 @@
 /**
  * @dsh-external/dsh-handoff-board — client：主区视图（conversation.view 插槽）。
  * 与「对话」「轨迹」并列切换。双视图：📋 列表 / 🧭 时间线泳道。
- * 交互：点行展开全文；📂 打开原对话；🔗 接续后自动跳转；🤖 子代理标记；未生成条目可一键生成。
+ * 层级：线程内主对话卡片在前，🤖 子代理记录折叠成组挂在下方（常驻显示）。
  */
 import { createElement as rc, useEffect, useState } from 'react'
 
@@ -25,7 +25,6 @@ interface ThreadV {
   title: string
   projectKey: string
   createdAt: number
-  cwd?: string
 }
 interface UnnotedV {
   sessionId: string
@@ -38,7 +37,6 @@ interface StateV {
   threads: ThreadV[]
   notes: NoteV[]
   unnoted?: UnnotedV[]
-  workspaces?: string[]
 }
 
 interface SessionsApi {
@@ -61,20 +59,17 @@ async function postJSON(path: string, body: unknown): Promise<any> {
 
 const STYLE_CSS = `
 .hb-wrap{font-family:system-ui,sans-serif;padding:14px;font-size:13px;color:inherit;height:100%;overflow:auto;box-sizing:border-box}
-.hb-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.hb-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
 .hb-head strong{font-size:15px}
 .hb-cnt{opacity:.6}
 .hb-sp{flex:1}
 .hb-toggle{display:flex;border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:7px;overflow:hidden}
 .hb-toggle button{border:none;background:transparent;color:inherit;padding:4px 12px;cursor:pointer;font-size:12px}
 .hb-toggle button.on{background:color-mix(in srgb,currentColor 14%,transparent);font-weight:700}
-.hb-select{background:transparent;color:inherit;border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:6px;padding:3px 6px;font-size:12px}
-.hb-check{display:flex;align-items:center;gap:3px;font-size:11px;opacity:.85}
 .hb-thread{margin:12px 0}
 .hb-thread h3{margin:4px 0;font-size:13px;opacity:.85}
 .hb-note{border:1px solid color-mix(in srgb,currentColor 18%,transparent);border-radius:8px;padding:8px 10px;margin:8px 0;cursor:pointer;max-width:860px}
 .hb-note:hover{background:color-mix(in srgb,currentColor 7%,transparent)}
-.hb-note.sub{margin-left:28px;border-style:dotted}
 .hb-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .hb-badge{font-size:11px;padding:1px 8px;border-radius:9px;border:1px solid currentColor;opacity:.85}
 .hb-badge.live{background:rgba(46,160,67,.15);border-color:rgba(46,160,67,.6)}
@@ -88,7 +83,12 @@ const STYLE_CSS = `
 .hb-btn:hover{background:color-mix(in srgb,currentColor 10%,transparent)}
 .hb-btn:disabled{opacity:.45;cursor:default}
 .hb-empty{opacity:.6;padding:32px;text-align:center}
-.hb-diag{color:#e5484d;padding:12px;border:1px solid #e5484d;border-radius:8px;font-family:monospace;font-size:11px;white-space:pre-wrap}
+/* 子代理折叠组 */
+.hb-subgroup{margin:6px 0 6px 26px}
+.hb-subgroup summary{cursor:pointer;font-size:12px;opacity:.8;list-style:none}
+.hb-subgroup summary::before{content:'▸ ';}
+.hb-subgroup[open] summary::before{content:'▾ ';}
+.hb-note.sub{margin-left:0;border-style:dotted}
 /* 时间线 */
 .hb-tl-rowlabel{font-size:11px;opacity:.75;margin:10px 0 2px;font-weight:600}
 .hb-tl-lane{position:relative;height:64px;border-bottom:1px dashed color-mix(in srgb,currentColor 20%,transparent);margin:0 90px 2px}
@@ -170,6 +170,7 @@ function NoteCard(props: { note: NoteV } & Handlers): any {
   )
 }
 
+/** 时间线：线程一行泳道；主卡实线、子代理虚线小卡加 ↳ 前缀。 */
 function TimelineView(props: { state: StateV; pickedId: string | null; onPick(id: string): void }): any {
   const notes = props.state.notes
   if (notes.length === 0) return null
@@ -224,8 +225,8 @@ function HelpSection(): any {
     rc('summary', { style: { cursor: 'pointer', fontSize: '12px' } }, '❓ 使用说明'),
     rc('div', { style: { fontSize: '12px', lineHeight: '1.8' } }, [
       rc('div', null, '📋 列表：点行展开六段全文；📂 打开原对话跳回来源会话；🔗 开新对话接续（自动跳转并注入全文）；✍️ 补写交接条为该会话重新生成一份新的（不覆盖旧条）。'),
-      rc('div', null, '🧭 时间线：一行一个项目线程，卡片位置＝发生时间，虚线小卡＝子代理；点气泡跳回列表展开。交接条多了以后，这里用来看「什么时候、哪个线程活跃、哪里有断层」。'),
-      rc('div', null, '🟢 进行中 / ⚪ 已归档 徽章跟随来源会话实时状态；↻ 手动刷新读最新账本；🤖 子代理记录默认隐藏，勾选显示。'),
+      rc('div', null, '🧭 时间线：一行一个项目线程；主对话＝实线大卡，子代理＝虚线小卡带 ↳；点气泡跳回列表展开。'),
+      rc('div', null, '🤖 子代理记录常驻显示在所属线程的折叠组里；🟢 进行中 / ⚪ 已归档 徽章跟随来源会话实时状态。'),
     ]),
   ])
 }
@@ -237,8 +238,6 @@ export function BoardApp(props: { sessions?: SessionsApi }): any {
   const [busy, setBusy] = useState(false)
   const [view, setView] = useState<'list' | 'timeline'>('list')
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [showSub, setShowSub] = useState(false)
-  const [wsSel, setWsSel] = useState<string>('all')
 
   const reload = async (): Promise<void> => {
     try {
@@ -304,22 +303,21 @@ export function BoardApp(props: { sessions?: SessionsApi }): any {
     )
   }
 
-  // 过滤管线：工作区 → 子代理可见性
-  const visThreads = state.threads.filter((t) => wsSel === 'all' || t.cwd === wsSel)
-  const visThreadIds = new Set(visThreads.map((t) => t.id))
-  const visibleNotes = state.notes.filter(
-    (n) => (showSub || n.kind !== 'subagent') && visThreadIds.has(n.threadId),
-  )
-  const hiddenSubCount = state.notes.filter((n) => n.kind === 'subagent').length -
-    visibleNotes.filter((n) => n.kind === 'subagent').length
+  // 分组：主线卡片在前，子代理归入折叠组常驻显示
+  const mainNotes = state.notes.filter((n) => n.kind !== 'subagent')
+  const subNotes = state.notes.filter((n) => n.kind === 'subagent')
   const notesByThread = new Map<string, NoteV[]>()
-  for (const n of visibleNotes) {
+  for (const n of mainNotes) {
     const list = notesByThread.get(n.threadId) ?? []
     list.push(n)
     notesByThread.set(n.threadId, list)
   }
-  // 孤儿兜底（threadId 对不上线程的记录不静默丢弃）
-  const orphans = state.notes.filter((n) => !visThreadIds.has(n.threadId))
+  const subsByThread = new Map<string, NoteV[]>()
+  for (const n of subNotes) {
+    const list = subsByThread.get(n.threadId) ?? []
+    list.push(n)
+    subsByThread.set(n.threadId, list)
+  }
 
   const handlers: Handlers = {
     sessions, busy, expandedId,
@@ -330,52 +328,33 @@ export function BoardApp(props: { sessions?: SessionsApi }): any {
   return rc('div', { className: 'hb-wrap' }, [
     rc('div', { key: 'head', className: 'hb-head' }, [
       rc('strong', { key: 't' }, '📌 交接板'),
-      rc('span', { key: 'c', className: 'cnt' },
-        `${visibleNotes.length} 条 · ${visThreads.length} 线程` +
-        (hiddenSubCount > 0 ? `（另有 ${hiddenSubCount} 条🤖记录已隐藏）` : '')),
+      rc('span', { key: 'c', className: 'cnt' }, `${state.notes.length} 条 · ${state.threads.length} 线程`),
       rc('span', { key: 'sp', className: 'hb-sp' }),
-      (state.workspaces ?? []).length > 1 &&
-        rc('select', {
-          key: 'ws', className: 'hb-select', value: wsSel,
-          onChange: (e: any) => setWsSel(e.target.value),
-        }, [
-          rc('option', { key: 'all', value: 'all' }, '全部工作区'),
-          ...(state.workspaces ?? []).map((w) => rc('option', { key: w, value: w }, w.split('/').pop())),
-        ]),
-      rc('label', { key: 'sub', className: 'hb-check' }, [
-        rc('input', {
-          type: 'checkbox', checked: showSub,
-          onChange: (e: any) => setShowSub(e.target.checked),
-        }),
-        '🤖',
-      ]),
-      rc('button', { key: 'r', className: 'hb-btn', disabled: busy, onClick: () => void reload() }, '↻'),
+      rc('button', { key: 'r', className: 'hb-btn', disabled: busy, onClick: () => void reload() }, '↻ 刷新'),
     ]),
-    visibleNotes.length === 0 && orphans.length === 0
+    state.notes.length === 0
       ? rc('div', { key: 'empty', className: 'hb-empty' },
-          `当前筛选下没有可见交接条。在任意会话里敲 /handoff 生成第一条。`)
+          '还没有交接条。在任意会话里敲 /handoff 生成第一条。')
       : view === 'timeline'
-        ? rc(TimelineView, {
-            key: 'tl',
-            state: { ...state, notes: visibleNotes, threads: visThreads },
-            pickedId: expandedId,
-            onPick: (id: string) => { setExpandedId(id); setView('list') },
-          })
-        : [
-            visThreads.map((t) => {
-              const list = notesByThread.get(t.id) ?? []
-              if (list.length === 0) return null
-              return rc('div', { key: t.id, className: 'hb-thread' }, [
-                rc('h3', { key: 'h' }, `${t.title}`),
-                ...list.map((n) => rc(NoteCard, { key: n.id, note: n, ...handlers })),
-              ])
-            }),
-            orphans.length > 0 &&
-              rc('div', { key: 'orphans', className: 'hb-thread' }, [
-                rc('h3', { key: 'h' }, '⚠️ 未归组条目（数据自检）'),
-                ...orphans.map((n) => rc(NoteCard, { key: n.id, note: n, ...handlers })),
-              ]),
-          ],
+        ? rc(TimelineView, { key: 'tl', state, pickedId: expandedId, onPick: (id: string) => { setExpandedId(id); setView('list') } })
+        : state.threads.map((t) => {
+            const mains = notesByThread.get(t.id) ?? []
+            const subs = subsByThread.get(t.id) ?? []
+            if (mains.length === 0 && subs.length === 0) return null
+            return rc('div', { key: t.id, className: 'hb-thread' }, [
+              rc('h3', { key: 'h' }, `${t.title}`),
+              ...mains.map((n) => rc(NoteCard, { key: n.id, note: n, ...handlers })),
+              subs.length > 0 &&
+                rc(
+                  'details',
+                  { key: 'subs-' + t.id, className: 'hb-subgroup' },
+                  [
+                    rc('summary', null, `🤖 子代理记录（${subs.length}）`),
+                    ...subs.map((n) => rc(NoteCard, { key: n.id, note: n, ...handlers })),
+                  ],
+                ),
+            ])
+          }),
     rc(HelpSection, { key: 'help' }),
   ])
 }
@@ -397,7 +376,8 @@ export function apply(ctx: ClientCtx): void {
   // 契约（照抄 ui-trajectory 标准写法）：register(描述符, React组件)，组件收 props 渲染。
   ctx.effect(() =>
     ctx.slots.inject('conversation.view', () =>
-      ctx.slots.register({
+      ctx.slots.register(
+        {
           name: 'conversation.view',
           id: 'handoff-board',
           order: 100,
