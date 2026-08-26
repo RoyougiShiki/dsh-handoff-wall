@@ -1,5 +1,5 @@
 /**
- * /handoff 命令：总结当前会话 → 六段交接条 → 入库。
+ * /handoff 命令与生成核心。
  * 编排三段式（bridge 模式）：取材 → 一次性工人 LLM → 落库回显。
  * 命令由 host 注册表直接执行，不经模型；结果文本由 UI 直接渲染。
  */
@@ -12,7 +12,7 @@ import { buildWorkerSystem, validateSections } from './prompt.js'
 import { redact } from './redact.js'
 
 /** 取材预算：字符数（不是字节——修 WeiYe6 中文≈8千字的坑） */
-const MAX_MATERIAL_CHARS = 24_000
+export const MAX_MATERIAL_CHARS = 24_000
 const WORKER_MAX_TOKENS = 3_000
 const WORKER_TIMEOUT_MS = 120_000
 
@@ -31,7 +31,7 @@ export function extractMaterial(events: any[]): MaterialResult {
 
   for (const e of events) {
     if (budget <= 0) break
-    const type = e?.type ?? e?.data?.type ?? ''
+    const type = e?.type ?? ''
     if (type !== 'user/message' && type !== 'assistant/message') continue
     const data = e.data ?? {}
     const blocks: any[] = Array.isArray(data.content) ? data.content : []
@@ -42,7 +42,6 @@ export function extractMaterial(events: any[]): MaterialResult {
       || (typeof data.text === 'string' ? data.text : '')
     if (!text.trim()) continue
 
-    // 文件路径线索（廉价正则，宁滥勿缺，反正只是 chips 展示）
     for (const m of text.matchAll(/[\w./-]+\/[\w./-]+\.(?:ts|tsx|js|mjs|cjs|md|json|ya?ml|toml|py|cs|cpp|h|rs|go|sh)/g)) {
       if (files.size < 30) files.add(m[0])
     }
@@ -64,7 +63,7 @@ export function extractMaterial(events: any[]): MaterialResult {
 
 export interface HandoffDeps {
   ctx: {
-    sessionQuery: { readSurface(sessionId: string): Promise<any> }
+    sessionQuery: { readSurface(sessionId: string): Promise<any>; listSessions(signal?: AbortSignal): Promise<any[]> }
     llm: {
       stream(options: {
         provider: string
@@ -117,6 +116,56 @@ export async function saveHandoff(
   return { note, thread }
 }
 
+/** 生成核心：命令与 write_handoff 工具共用同一引擎（三入口一引擎）。 */
+export async function generateHandoff(
+  deps: HandoffDeps,
+  sessionId: string,
+): Promise<{ body: string; title: string; note: NoteRow; thread: ThreadRow }> {
+  const surface = await deps.ctx.sessionQuery.readSurface(sessionId)
+  const header = surface?.session ?? {}
+  const material = extractMaterial(surface?.events ?? [])
+  if (!material.transcript) throw new Error('该会话没有可总结的对话内容')
+
+  const route = deps.ctx.agentDefaultModel.currentSelection()
+  const materialRedacted = redact(material.transcript)
+  let body = ''
+  const stream = deps.ctx.llm.stream({
+    provider: route.provider,
+    model: route.model,
+    system: buildWorkerSystem(),
+    messages: [
+      createUserMessage({
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: `会话 ${sessionId} 的材料如下：\n\n${materialRedacted}` }],
+      }),
+    ],
+    temperature: 0,
+    reasoningEffort: ReasoningEffortId('off'),
+    maxTokens: WORKER_MAX_TOKENS,
+  })
+  const timeout = AbortSignal.timeout(WORKER_TIMEOUT_MS)
+  for await (const chunk of stream) {
+    if (timeout.aborted) throw new Error('工人摘要超时（120s）')
+    if (chunk.type === 'text-delta' && chunk.text) body += chunk.text
+  }
+
+  const check = validateSections(body)
+  if (!check.ok) {
+    throw new Error(`工人输出缺少段落：${check.missing.join('、')}——已放弃入库，可重试`)
+  }
+  body = redact(body)
+
+  const title = (material.firstUserText || header.cwd || sessionId).replace(/\s+/g, ' ').slice(0, 60)
+  const { note, thread } = await saveHandoff(deps.domain, {
+    sessionId,
+    cwd: header.cwd,
+    title,
+    body,
+    files: material.files,
+  })
+  return { body, title, note, thread }
+}
+
 /** 组装 /handoff 命令定义（host 注册表直执行，不经模型）。 */
 export function createHandoffCommand(deps: HandoffDeps): Record<string, unknown> {
   return {
@@ -126,62 +175,9 @@ export function createHandoffCommand(deps: HandoffDeps): Record<string, unknown>
       try {
         const sessionId: string | undefined =
           invocation?.agent?.session?.id ?? invocation?.agent?.sessionId
-        if (!sessionId) {
-          return { kind: 'error', text: 'handoff: 当前上下文没有活动会话' }
-        }
+        if (!sessionId) return { kind: 'error', text: 'handoff: 当前上下文没有活动会话' }
 
-        // ── 取材 ──
-        const surface = await deps.ctx.sessionQuery.readSurface(sessionId)
-        const header = surface?.session ?? {}
-        const material = extractMaterial(surface?.events ?? [])
-        if (!material.transcript) {
-          return { kind: 'error', text: 'handoff: 该会话没有可总结的对话内容' }
-        }
-
-        // ── 工人 LLM（独立调用：provider/model 显式路由；超时真接线——修 WeiYe6 坑①）──
-        const route = deps.ctx.agentDefaultModel.currentSelection()
-        const materialRedacted = redact(material.transcript)
-        let body = ''
-        const stream = deps.ctx.llm.stream({
-          provider: route.provider,
-          model: route.model,
-          system: buildWorkerSystem(),
-          messages: [
-            createUserMessage({
-              source: { kind: 'user' },
-              content: [{ type: 'text', text: `会话 ${sessionId} 的材料如下：\n\n${materialRedacted}` }],
-            }),
-          ],
-          temperature: 0,
-          reasoningEffort: ReasoningEffortId('off'),
-          maxTokens: WORKER_MAX_TOKENS,
-        })
-        const timeout = AbortSignal.timeout(WORKER_TIMEOUT_MS)
-        for await (const chunk of stream) {
-          if (timeout.aborted) throw new Error('handoff: 工人摘要超时（120s）')
-          if (chunk.type === 'text-delta' && chunk.text) body += chunk.text
-        }
-
-        // ── 结构校验：六段缺失即废稿，响亮失败 ──
-        const check = validateSections(body)
-        if (!check.ok) {
-          return {
-            kind: 'error',
-            text: `handoff: 工人输出缺少段落：${check.missing.join('、')}——已放弃入库，可重试`,
-          }
-        }
-        body = redact(body)
-
-        // ── 落库 ──
-        const title = (material.firstUserText || header.cwd || sessionId).replace(/\s+/g, ' ').slice(0, 60)
-        const { note, thread } = await saveHandoff(deps.domain, {
-          sessionId,
-          cwd: header.cwd,
-          title,
-          body,
-          files: material.files,
-        })
-
+        const { body, note, thread } = await generateHandoff(deps, sessionId)
         return {
           kind: 'success',
           text: `${body}\n\n---\n✅ 已存入交接板：${thread.title} / ${note.title}（${note.id.slice(0, 8)}）`,
