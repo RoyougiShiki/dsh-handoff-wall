@@ -9,6 +9,7 @@ import type { Context } from 'cordis'
 import { openBoard, type BoardDomain } from './store.js'
 import { createHandoffCommand } from './command.js'
 import { registerBoardTools } from './tools.js'
+import { mountBoardRoutes } from './routes.js'
 
 export const name = 'dsh-handoff-board'
 
@@ -16,7 +17,7 @@ export const name = 'dsh-handoff-board'
  * 服务依赖：storageDomain 必须先于本插件挂载（inject 保证次序）。
  * agents/workspaceRegistry 留给 M2 会话接续功能再加，最小化 M1 失败面。
  */
-export const inject = ['storageDomain', 'commands', 'sessionQuery', 'llm', 'agentDefaultModel', 'tools', 'agents', 'workspaceRegistry']
+export const inject = ['storageDomain', 'commands', 'sessionQuery', 'llm', 'agentDefaultModel', 'tools', 'agents', 'workspaceRegistry', 'webServer']
 
 type HandoffContext = Context & {
   storageDomain: { open(spec: unknown): Promise<unknown> }
@@ -27,6 +28,7 @@ type HandoffContext = Context & {
   tools: { register(def: unknown): () => void }
   agents: { create(options: unknown): Promise<unknown> }
   workspaceRegistry: { resolveByPath(path: string): Promise<unknown> }
+  webServer: { register(route: { kind: 'exact' | 'prefix'; path: string; handler: (req: unknown, res: unknown) => unknown }): () => void }
 }
 
 export async function apply(ctx: HandoffContext): Promise<void> {
@@ -61,5 +63,8 @@ export async function apply(ctx: HandoffContext): Promise<void> {
     }),
   )
 
-  ctx.logger?.info?.('[dsh-handoff-board] 交接板就绪：/handoff 已注册，账本 handoff_board 已打开，四工具已上线')
+  // M3：client 列表视图的数据与动作面
+  ctx.effect(() => mountBoardRoutes(ctx, domain))
+
+  ctx.logger?.info?.('[dsh-handoff-board] 交接板就绪：/handoff 已注册，账本 handoff_board 已打开，四工具已上线，路由 /handoff-board/* 已挂载')
 }
