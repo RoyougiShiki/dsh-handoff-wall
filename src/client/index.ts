@@ -372,24 +372,19 @@ export const inject = ['slots', 'sessions']
 
 export function apply(ctx: ClientCtx): void {
   injectStyles()
-  // 主区视图：与「对话」「轨迹」并列的切换页签。order=100 排在轨迹之后。
-  // 契约（照抄 ui-trajectory 标准写法）：register(描述符, React组件)，组件收 props 渲染。
+  // 视图承载：better-sidebar Tab（右侧栏）。主区并列需上游视图账本 API，登记雾区。
   ctx.effect(() =>
-    ctx.slots.inject('conversation.view', () =>
-      ctx.slots.register({
-          name: 'conversation.view',
-          id: 'handoff-board',
-          order: 100,
-          label: () => '交接板',
-          icon: (size?: number) => rc('span', { style: { fontSize: (size ?? 16) + 'px' } }, '📌'),
-          component: BoardApp,
-        },
-        function BoardShell(): any {
-          return rc(BoardApp, { sessions: ctx.sessions })
-        },
-      ),
-    ),
-    'handoff-board: view',
+    ctx.betterSidebar.registerTab({
+      id: 'handoff-board:wall',
+      title: () => '交接板',
+      icon: (size?: number) => rc('span', { style: { fontSize: (size ?? 16) + 'px' } }, '📌'),
+      order: 55,
+      single: true,
+      component: function BoardShell(): any {
+        return rc(BoardApp, { sessions: ctx.sessions })
+      },
+    }),
+    'handoff-board: tab',
   )
   console.info('[dsh-handoff-board] client registered（主区视图：交接板，order=100）')
 }
