@@ -56,7 +56,11 @@ export function extractMaterial(events: any[]): MaterialResult {
       lines.push(line)
       budget -= line.length
     }
-    if (!firstUserText && role === '用户') firstUserText = text.slice(0, 80)
+    // 标题线索只取真正的用户轮：跳过工人取材语料这类「包装文本」，
+    // 否则补写场景的标题会变成整段取材指令（真实案例）
+    if (role === '用户' && !firstUserText && !/取材|以下是某个 AI 编程会话|用户消息全文/.test(text.slice(0, 60))) {
+      firstUserText = text.slice(0, 80)
+    }
   }
   return { transcript: lines.join('\n\n'), files: [...files], firstUserText }
 }
