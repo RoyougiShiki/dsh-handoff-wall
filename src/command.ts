@@ -216,6 +216,9 @@ export async function generateHandoff(
   }
   body = redact(body)
 
+  if (typeof (deps.domain as any).table !== 'function') {
+    throw new Error('账本已关闭（插件重载/卸载发生在生成途中）——请重试补写')
+  }
   const title = deriveTitle(material.firstUserText)
   const { note, thread } = await saveHandoff(deps.domain, {
     sessionId,
