@@ -56,7 +56,7 @@ export function buildBoardTools(deps: ToolsDeps) {
         out.push(`\n## ${t.title}（线程 ${t.id.slice(0, 8)}）`)
         for (const n of tn) {
           const info = infoOf(sessionMap, n.sessionId)
-          const parent = n.parentSessionId ? ` ←父${n.parentSessionId.slice(0, 8)}` : ''
+          const parent = n.parentSessionId ? ` ←父${n.parentSessionId.replace(/^session-/, '').slice(0, 8)}` : ''
           out.push(
             `- ${fmt(n.createdAt)} | ${info.kind}${parent} | ${n.title} | ${info.status} | 文件${n.files.length} | id=${n.id.slice(0, 8)}`,
           )
