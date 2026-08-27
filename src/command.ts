@@ -14,8 +14,8 @@ import { redact } from './redact.js'
 /** 取材预算：字符数（不是字节——修 WeiYe6 中文≈8千字的坑） */
 export const MAX_MATERIAL_CHARS = 24_000
 const WORKER_MAX_TOKENS = 3_000
-const WORKER_TIMEOUT_MS = 120_000
-
+/** 每轮独立超时：glm 思考型路由首轮普遍 >120s，统一短超时会整轮报废；signal 直入流真正掐断请求 */
+const WORKER_TIMEOUTS_MS = [150_000, 210_000, 240_000]
 interface MaterialResult {
   transcript: string
   files: string[]
@@ -73,6 +73,7 @@ export interface HandoffDeps {
         temperature?: number
         reasoningEffort?: unknown
         maxTokens?: number
+        signal?: AbortSignal
       }): AsyncIterable<{ type: string; text?: string }>
     }
     agentDefaultModel: { currentSelection(): { provider: string; model: string } }
@@ -145,6 +146,7 @@ export async function generateHandoff(
     maxTokens: number
     directive?: string
     withEffortOff?: boolean
+    timeoutMs: number
   }): Promise<{ body: string; stats: string }> => {
     let text = ''
     let reasonChars = 0
@@ -152,6 +154,7 @@ export async function generateHandoff(
     const chunkTypes: Record<string, number> = {}
     let firstNonText: string | undefined
     let lastFinish: string | undefined
+    const timeout = AbortSignal.timeout(attempt.timeoutMs)
     const stream = deps.ctx.llm.stream({
       provider: route.provider,
       model: route.model,
@@ -165,10 +168,11 @@ export async function generateHandoff(
       temperature: 0,
       ...(attempt.withEffortOff ? { reasoningEffort: ReasoningEffortId('off') } : {}),
       maxTokens: attempt.maxTokens,
+      // 契约：适配器必须遵守 GenerateOptions.signal——超时真正掐断请求，不放任后台烧 token
+      signal: timeout,
     })
-    const timeout = AbortSignal.timeout(WORKER_TIMEOUT_MS)
     for await (const chunk of stream) {
-      if (timeout.aborted) throw new Error(`工人摘要超时（${WORKER_TIMEOUT_MS / 1000}s）`)
+      if (timeout.aborted) throw new Error(`工人摘要超时（${attempt.timeoutMs / 1000}s）`)
       const t = String((chunk as any).type ?? 'unknown')
       chunkTypes[t] = (chunkTypes[t] ?? 0) + 1
       if (t === 'text-delta') {
@@ -188,9 +192,9 @@ export async function generateHandoff(
   let body = ''
   let lastStats = ''
   const attempts = [
-    { maxTokens: WORKER_MAX_TOKENS, withEffortOff: true },
-    { maxTokens: WORKER_MAX_TOKENS * 3, withEffortOff: true, directive: '跳过一切思考/解释/前缀，直接以「## 任务目标」开头的 Markdown 正文作为全部输出。' },
-    { maxTokens: WORKER_MAX_TOKENS * 3, withEffortOff: false, directive: '跳过一切思考/解释/前缀，直接以「## 任务目标」开头的 Markdown 正文作为全部输出。' },
+    { maxTokens: WORKER_MAX_TOKENS, withEffortOff: true, timeoutMs: WORKER_TIMEOUTS_MS[0] },
+    { maxTokens: WORKER_MAX_TOKENS * 3, withEffortOff: true, directive: '跳过一切思考/解释/前缀，直接以「## 任务目标」开头的 Markdown 正文作为全部输出。', timeoutMs: WORKER_TIMEOUTS_MS[1] },
+    { maxTokens: WORKER_MAX_TOKENS * 3, withEffortOff: false, directive: '跳过一切思考/解释/前缀，直接以「## 任务目标」开头的 Markdown 正文作为全部输出。', timeoutMs: WORKER_TIMEOUTS_MS[2] },
   ]
   for (const attempt of attempts) {
     try {
