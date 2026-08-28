@@ -11,8 +11,10 @@ import { resolveProjectKey } from './store.js'
 import { buildWorkerSystem, validateSections } from './prompt.js'
 import { redact } from './redact.js'
 
-/** 取材预算：字符数（不是字节——修 WeiYe6 中文≈8千字的坑） */
+/** 取材预算：字符数（不是字节——修 WeiYe6 中文按字符计的坑） */
 export const MAX_MATERIAL_CHARS = 24_000
+/** 单轮正文压缩标记：保留开头+结尾，不丢整轮、不只切开头。 */
+export const COMPRESS_MARK = '…(压缩，保留开头与结尾)…'
 const WORKER_MAX_TOKENS = 3_000
 /** 每轮独立超时：glm 思考型路由首轮普遍 >120s，统一短超时会整轮报废；signal 直入流真正掐断请求 */
 const WORKER_TIMEOUTS_MS = [150_000, 210_000, 240_000]
@@ -20,26 +22,88 @@ interface MaterialResult {
   transcript: string
   files: string[]
   firstUserText: string
+  compressed: boolean
+}
+
+function eventPlainText(e: any): string {
+  const data = e?.data ?? {}
+  const blocks: any[] = Array.isArray(data.content) ? data.content : []
+  const fromBlocks = blocks
+    .filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
+    .map((b: any) => b.text)
+    .join('\n')
+  return fromBlocks || (typeof data.text === 'string' ? data.text : '')
+}
+
+/** 超长单轮：两端都留。只切开头会把后半段的「已修好」丢掉。 */
+export function foldText(text: string, cap: number): string {
+  if (cap <= 0) return ''
+  if (text.length <= cap) return text
+  if (cap <= COMPRESS_MARK.length + 16) return text.slice(0, Math.max(1, cap - 1)) + '…'
+  const keep = cap - COMPRESS_MARK.length
+  const head = Math.max(8, Math.floor(keep * 0.45))
+  const tail = keep - head
+  return text.slice(0, head) + COMPRESS_MARK + text.slice(text.length - tail)
+}
+
+function weightOf(index: number, n: number): number {
+  if (index === 0) return 3
+  if (index === n - 1) return 5
+  if (index === n - 2) return 3
+  if (index === n - 3) return 2
+  return 1
+}
+
+/**
+ * 限尺寸但不丢轮次：每一轮都出现在材料里。
+ * 预算按权重分给「首条目标 + 最近几轮」，中间轮分得少，用开头+结尾压缩，而不是整段省略。
+ */
+export function packTurns(
+  turns: { role: string; text: string }[],
+  budget = MAX_MATERIAL_CHARS,
+): { transcript: string; compressed: boolean } {
+  if (turns.length === 0) return { transcript: '', compressed: false }
+  const sep = '\n\n'
+  const prefix = (role: string) => `[${role}] `
+  const n = turns.length
+  const fixed = turns.reduce((sum, t, i) => sum + prefix(t.role).length + (i > 0 ? sep.length : 0), 0)
+  let available = budget - fixed
+  if (available < n * 48) available = n * 48
+
+  const weights = turns.map((_, i) => weightOf(i, n))
+  const weightSum = weights.reduce((a, b) => a + b, 0)
+  const fairs = turns.map((_, i) => Math.max(48, Math.floor(available * (weights[i]! / weightSum))))
+  const caps = turns.map((t, i) => Math.min(t.text.length, fairs[i]!))
+  // 把「正文比配额短」省下的额度补给还被压着的轮次（从最近一轮往前）
+  let spare = 0
+  for (let i = 0; i < n; i++) spare += fairs[i]! - caps[i]!
+  for (let i = n - 1; i >= 0 && spare > 0; i--) {
+    const need = turns[i]!.text.length - caps[i]!
+    if (need <= 0) continue
+    const give = Math.min(need, spare)
+    caps[i] = caps[i]! + give
+    spare -= give
+  }
+
+  let compressed = false
+  const lines = turns.map((t, i) => {
+    const folded = foldText(t.text, caps[i]!)
+    if (folded.length < t.text.length) compressed = true
+    return prefix(t.role) + folded
+  })
+  return { transcript: lines.join(sep), compressed }
 }
 
 /** 从 surface 事件里防御性提取对话文本与文件路径线索。 */
 export function extractMaterial(events: any[]): MaterialResult {
-  const lines: string[] = []
   const files = new Set<string>()
   let firstUserText = ''
-  let budget = MAX_MATERIAL_CHARS
+  const turns: { role: string; text: string }[] = []
 
   for (const e of events) {
-    if (budget <= 0) break
     const type = e?.type ?? ''
     if (type !== 'user/message' && type !== 'assistant/message') continue
-    const data = e.data ?? {}
-    const blocks: any[] = Array.isArray(data.content) ? data.content : []
-    const text = blocks
-      .filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
-      .map((b: any) => b.text)
-      .join('\n')
-      || (typeof data.text === 'string' ? data.text : '')
+    const text = eventPlainText(e)
     if (!text.trim()) continue
 
     for (const m of text.matchAll(/[\w./-]+\/[\w./-]+\.(?:ts|tsx|js|mjs|cjs|md|json|ya?ml|toml|py|cs|cpp|h|rs|go|sh)/g)) {
@@ -47,22 +111,13 @@ export function extractMaterial(events: any[]): MaterialResult {
     }
 
     const role = type === 'user/message' ? '用户' : '助手'
-    const clipped = text.length > 2_000 ? text.slice(0, 2_000) + '…(截断)' : text
-    const line = `[${role}] ${clipped}`
-    if (line.length > budget) {
-      lines.push(line.slice(0, budget) + '…(预算截断)')
-      budget = 0
-    } else {
-      lines.push(line)
-      budget -= line.length
-    }
-    // 标题线索只取真正的用户轮：跳过工人取材语料这类「包装文本」，
-    // 否则补写场景的标题会变成整段取材指令（真实案例）
+    turns.push({ role, text })
     if (role === '用户' && !firstUserText && !/取材|以下是某个 AI 编程会话|用户消息全文/.test(text.slice(0, 60))) {
       firstUserText = text.slice(0, 80)
     }
   }
-  return { transcript: lines.join('\n\n'), files: [...files], firstUserText }
+  const packed = packTurns(turns)
+  return { transcript: packed.transcript, files: [...files], firstUserText, compressed: packed.compressed }
 }
 
 export interface HandoffDeps {
@@ -107,18 +162,31 @@ export async function saveHandoff(
     }
     await threads.put(thread.id, thread)
   }
-
-  const note: NoteRow = {
-    id: randomUUID(),
-    threadId: thread.id,
-    sessionId: input.sessionId,
-    parentSessionId: input.parentSessionId ?? '',
-    createdAt: Date.now(),
-    title: input.title,
-    body: input.body,
-    files: input.files,
-    provenance: 'curated',
-  }
+  const existing = [...notes.entries()].find(([, r]) => {
+    const row = r as NoteRow
+    return row.sessionId === input.sessionId && row.provenance === 'curated'
+  })
+  const note: NoteRow = existing
+    ? {
+        ...(existing[1] as NoteRow),
+        threadId: thread.id,
+        parentSessionId: input.parentSessionId ?? (existing[1] as NoteRow).parentSessionId,
+        createdAt: Date.now(),
+        title: input.title,
+        body: input.body,
+        files: input.files,
+      }
+    : {
+        id: randomUUID(),
+        threadId: thread.id,
+        sessionId: input.sessionId,
+        parentSessionId: input.parentSessionId ?? '',
+        createdAt: Date.now(),
+        title: input.title,
+        body: input.body,
+        files: input.files,
+        provenance: 'curated',
+      }
   await notes.put(note.id, note)
   return { note, thread }
 }
@@ -166,7 +234,7 @@ export async function generateHandoff(
       messages: [
         createUserMessage({
           source: { kind: 'user' },
-          content: [{ type: 'text', text: (attempt.directive ? attempt.directive + '\n\n' : '') + `会话 ${sessionId} 的材料如下：\n\n${materialRedacted}` }],
+          content: [{ type: 'text', text: (attempt.directive ? attempt.directive + '\n\n' : '') + (material.compressed ? '材料中部分长轮次做了「开头+结尾」压缩，中间未删除、时间顺序完整。开放问题以末尾仍成立的事实为准。\n\n' : '') + `会话 ${sessionId} 的材料如下：\n\n${materialRedacted}` }],
         }),
       ],
       temperature: 0,

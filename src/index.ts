@@ -15,27 +15,28 @@ export const name = 'dsh-handoff-board'
 
 /**
  * 服务依赖：storageDomain 必须先于本插件挂载（inject 保证次序）。
- * agents/workspaceRegistry 留给 M2 会话接续功能再加，最小化 M1 失败面。
+ * agentPresets 给接续会话挂 DSH 模式（header + mount）；缺了会开出无工具的裸会话。
  */
-export const inject = ['storageDomain', 'commands', 'sessionQuery', 'llm', 'agentDefaultModel', 'tools', 'agents', 'workspaceRegistry', 'webServer']
+export const inject = ['storageDomain', 'commands', 'sessionQuery', 'llm', 'agentDefaultModel', 'tools', 'agents', 'workspaceRegistry', 'webServer', 'agentPresets']
 
 type HandoffContext = Context & {
   storageDomain: { open(spec: unknown): Promise<unknown> }
   commands: { register(def: unknown): () => void }
-  sessionQuery: { readSurface(id: string): Promise<unknown>; listSessions(signal?: AbortSignal): Promise<unknown[]>; load(sid: string): Promise<{ events: readonly unknown[] }> }
+  sessionQuery: { readSurface(id: string): Promise<unknown>; readSession?(id: string): Promise<unknown>; listSessions(signal?: AbortSignal): Promise<unknown[]>; load?(sid: string): Promise<{ events: readonly unknown[] }> }
   llm: Parameters<typeof createHandoffCommand>[0]['ctx']['llm']
   agentDefaultModel: { currentSelection(): { provider: string; model: string } }
   tools: { register(def: unknown): () => void }
   agents: { create(options: unknown): Promise<unknown> }
   workspaceRegistry: { resolveByPath(path: string): Promise<unknown> }
   webServer: { register(route: { kind: 'exact' | 'prefix'; path: string; handler: (req: unknown, res: unknown) => unknown }): () => void }
+  agentPresets: { resolve(id?: string): Promise<{ id: string }>; mount(agentCtx: unknown, id?: string): Promise<unknown> }
 }
 
 export async function apply(ctx: HandoffContext): Promise<void> {
-  // 诊断探针：确认注入上下文里九个服务的真实存在性
+  // 诊断探针：确认注入上下文里服务的真实存在性
   const keys = [
     'storageDomain', 'commands', 'sessionQuery', 'llm', 'agentDefaultModel',
-    'tools', 'agents', 'workspaceRegistry', 'webServer',
+    'tools', 'agents', 'workspaceRegistry', 'webServer', 'agentPresets',
   ] as const
   const probe = keys.map((k) => `${k}=${(ctx as unknown as Record<string, unknown>)[k] === undefined ? '❌' : '✅'}`).join(' ')
   console.info('[dsh-handoff-board] 服务探针:', probe)
@@ -73,7 +74,7 @@ export async function apply(ctx: HandoffContext): Promise<void> {
     )
 
     // M3：client 列表视图的数据与动作面
-    ctx.effect(() => mountBoardRoutes(ctx, domain!))
+    ctx.effect(() => mountBoardRoutes(ctx as never, domain!))
 
     ctx.logger?.info?.('[dsh-handoff-board] 交接板就绪：/handoff 已注册，账本 handoff_board 已打开，四工具已上线，路由 /handoff-board/* 已挂载')
   } catch (e) {

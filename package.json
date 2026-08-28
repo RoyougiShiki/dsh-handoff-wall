@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-handoff-board",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "DSH 会话间上下文交接与线程时间线可视化插件：换班写交接条，串成时间线，人和 AI 都能翻",
   "private": true,
   "type": "module",
@@ -17,8 +17,7 @@
     "@deepseek-ai/dsh-tools": ">=0.0.1-rc <2",
     "cordis": ">=4.0.0-rc <5",
     "schemastery": "^3.18.0",
-    "@deepseek-ai/dsh-client-ui-slots": ">=0.0.1-rc <2",
-    "dsh-better-sidebar": ">=0.4.0"
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.0.1-rc <2"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
@@ -53,11 +52,6 @@
         "@deepseek-ai/dsh-client-ui-slots"
       ],
       "platform": "web"
-    }
-  },
-  "peerDependenciesMeta": {
-    "dsh-better-sidebar": {
-      "optional": true
     }
   }
 }

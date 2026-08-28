@@ -275,7 +275,7 @@ export function mountBoardRoutes(ctx: RouteDeps['ctx'], domain: BoardDomain): ()
       return
     }
     const result = await continueWithNote({ ctx }, domain, body.noteId)
-    json(res, 200, { ok: true, newSessionId: result.newSessionId, title: result.note.title, warning: result.warning })
+    json(res, 200, { ok: true, newSessionId: result.newSessionId, title: result.note.title, agentPreset: result.agentPreset, warning: result.warning })
   }))
 
   // ── 补写交接：为指定会话现场生成（独立工人，不依赖该会话存活）──

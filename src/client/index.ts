@@ -815,7 +815,7 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
               onLocate,
             })
           : rc('div', { className: 'hb-dhint' },
-            '点上方交接卡，或下方会话树中的行，查看详情。未交接的会话直接在树里点「查看」可补写。'
+            '点上方交接卡或下方会话树查看详情。未交接可补写；已有交接可在详情里「重新生成」覆盖本条。'
           )),
     ]),
     rc('div', { key: 'toasts', id: 'hb-toasts' },
@@ -954,7 +954,7 @@ function renderTreeRow(fam: Fam, ctx: RenderCtx, depth: number): any {
   ]
 }
 
-/* ── 详情面板：正式条给全文+接续；占位/外部给说明+补写 ── */
+/* ── 详情面板：正式条给全文+接续+重新生成；占位/外部给说明+补写 ── */
 function DetailPanel(props: {
   node: TNode
   busy: boolean
@@ -1018,6 +1018,12 @@ function DetailPanel(props: {
           title: n.note?.missing ? '原会话已不存在' : undefined,
           onClick: () => props.onOpenSource(n.sessionId, n.note?.missing),
         }, n.note?.missing ? '原会话已不存在' : '↗ 打开原对话'),
+        rc('button', {
+          className: 'hb-btn',
+          disabled: props.busy || n.note?.missing === true,
+          title: n.note?.missing ? '原会话已不存在，无法取材' : '用该会话当前内容覆盖本条（工人约数分钟）',
+          onClick: () => void props.onGenerate(n.sessionId),
+        }, '↻ 重新生成'),
         rc('button', {
           className: 'hb-btn primary',
           disabled: props.busy,
