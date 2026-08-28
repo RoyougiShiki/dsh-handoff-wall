@@ -8,7 +8,8 @@
   "types": "./lib/types/index.d.ts",
   "files": [
     "lib",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "README.md"
   ],
   "license": "BSD-3-Clause",
   "peerDependencies": {
