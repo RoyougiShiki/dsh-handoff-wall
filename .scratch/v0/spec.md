@@ -6,13 +6,13 @@
 
 ## 1. 任务目标
 
-一个装进 DSH、日常可用的 v0.1 插件：换班时写下「交接条」，条按项目串成线程，人和 AI 都能翻。完整闭环 = 任意会话生成六段交接条入库 → 新对话经接续或查询拿到上下文 → 人有列表与时间线墙两视图 → AI 有四工具。
+一个装进 DSH、日常可用的 v0.1 插件：换班时写下「交接条」，条按项目串成线程，人和 AI 都能翻。完整闭环 = 任意会话生成六段交接条入库 → 新对话经接续或查询拿到上下文 → 人有单视图关联时间线（以交接关联为主轴）→ AI 有四工具。
 
 术语以 [CONTEXT.md](../../CONTEXT.md) 为准；四项架构决策见 [docs/adr/](../../docs/adr/)（L2-only 无采集器 · 单账本 · 生命周期同步宿主 · 三入口一引擎）。
 
 ## 2. 范围
 
-**v0.1 内**：host（storageDomain 两表账本、`/handoff` 命令、AI 四工具、接续）；client（主区视图 `conversation.view` 插槽——与「对话」「轨迹」并列切换、排最后；📋 列表 + 🧭 纯 CSS 时间线泳道两视图）。
+**v0.1 内**：host（storageDomain 两表账本、`/handoff` 命令、AI 四工具、接续）；client（主区视图 `conversation.view` 插槽——与「对话」「轨迹」并列切换、排最后；🧭 单视图关联时间线 + 右侧详情栏，以交接关联为主轴、时间为次级标签）。
 
 **明确不做**（地图 Out of scope）：自动沉淀采集器、GitHub 发布、跨 harness 格式兼容、AI 自动判定边界。
 
@@ -47,7 +47,7 @@ domain `handoff_board` v1，两张表：
 ### 5.2 AI 工具四件套（ctx.tools.register，defineTool 定义）
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `board` | （无参数，全量返回） | 线程分组的条目 bullet 清单（日期 \| 标题 \| 状态 \| 类型(主对话/🤖子代理+父id) \| 文件数 \| id），时间倒序 |
+| `board` | （无参数，全量返回） | 按关联族分组的条目 bullet 清单（日期 \| 标题 \| 状态 \| 类型(主对话/🤖子代理+父id) \| 文件数 \| id），时间倒序 |
 | `read_handoff` | id(string, required) | 六段全文 markdown |
 | `write_handoff` | session_id?(string，缺省=当前会话) | 回执文本 + `{note_id, thread_title, title}` |
 | `who_else` | path(string, required) | 仅「活着的」其他会话（剔除调用者自身），附最后触达时间 |
@@ -58,9 +58,12 @@ domain `handoff_board` v1，两张表：
 ### 5.4 会话接续链
 读源会话 cwd → `agents.create({sessionId:'session-'+uuid, meta:{cwd,parentSession}})` → `workspaceRegistry.resolveByPath(cwd).attachSession()`（失败降级不阻断）→ `agent.inject` 注入「引导语+六段全文+来源会话 id」为模型可见首条消息（source:{kind:'plugin'}）。不自动唤醒。attachSession 失败不静默——以 warning 字段回传前端提示手动归组。标题改名步骤 v0.1 未实现（登记雾区）。
 
-### 5.5 视图（同一 storageDomain 两张皮）
-- **列表**（主区视图 conversation.view 插槽，order=100 排轨迹后；better-sidebar Tab 方案已废弃）：线程分组 → 条目卡片（状态徽章 live/persisted 映射 进行中/已归档）→ 点开看六段全文 + 三按钮。
-- **时间线墙**（实现期修订）：纯 CSS 泳道——每线程一行、条按 createdAt 在时间轴上定位；不引入 React Flow，因为 MVP 的诉求是「排队看先后」而非自由摆放；自由拖拽与缩放留雾区美化。
+### 5.5 视图（同一 storageDomain，单张皮：关联时间线，v0.5 定稿）
+- **单视图：关联时间线**（主区视图 conversation.view 插槽，order=100 排轨迹后；better-sidebar Tab 方案与列表模式均已废弃）：以「交接关联」为主轴、时间为次级标签的竖向时间线 + 右侧详情栏。
+- **关联模型（v0.5，见 ADR-0005）**：`notes.parentSessionId`（`''`=首条）为血缘键建树，按「交接族」分组；🤖 子代理与正式条按血缘缩进挂父卡下；跨工作区父会话补虚线「外部原对话」节点；家族按子树最新活动倒序（`subtreeMax`）。
+- **反向关联显式化**：每卡标注「↳ 被 N 接续」「源: 前8位父id」与 进行中/🤖子代理/↪外部 徽章；时间退为卡片内次级标签。
+- **交互**：父节点默认折叠、点 ▶ 展开；点卡在右侧详情栏看六段全文 + 打开原对话/开新对话/补写三按钮；右栏独立滚动（根容器对齐插槽 100% 高度链、去 46vh 内部 caps）。
+- **设计约束**：不引入 React Flow；关联关系全部由静态数据（parentSessionId/kind/sessionQuery live）派生、零 LLM 成本，与 talkmap 弃用（仅指 LLM 滚动摘要）不冲突。
 ### 5.6 数据读取路径（澄清，防混淆）
 - 账本里有交接条 → 工具/UI 直接返回原文，永不重复总结
 - 无条的时段 → 查询时现场机械提取原始日志干事实（零 LLM）；detail 式深挖=一次性 LLM+缓存

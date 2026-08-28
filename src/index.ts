@@ -22,7 +22,7 @@ export const inject = ['storageDomain', 'commands', 'sessionQuery', 'llm', 'agen
 type HandoffContext = Context & {
   storageDomain: { open(spec: unknown): Promise<unknown> }
   commands: { register(def: unknown): () => void }
-  sessionQuery: { readSurface(id: string): Promise<unknown>; listSessions(signal?: AbortSignal): Promise<unknown[]> }
+  sessionQuery: { readSurface(id: string): Promise<unknown>; listSessions(signal?: AbortSignal): Promise<unknown[]>; load(sid: string): Promise<{ events: readonly unknown[] }> }
   llm: Parameters<typeof createHandoffCommand>[0]['ctx']['llm']
   agentDefaultModel: { currentSelection(): { provider: string; model: string } }
   tools: { register(def: unknown): () => void }
@@ -39,11 +39,11 @@ export async function apply(ctx: HandoffContext): Promise<void> {
   ] as const
   const probe = keys.map((k) => `${k}=${(ctx as unknown as Record<string, unknown>)[k] === undefined ? '❌' : '✅'}`).join(' ')
   console.info('[dsh-handoff-board] 服务探针:', probe)
+  let domain: BoardDomain | null = null
   try {
-    const domain: BoardDomain = await openBoard(ctx)
-
+    domain = await openBoard(ctx)
     // 存储域生命周期归 caller（票10 调研结论）：fiber 卸载时关闭
-    ctx.effect(() => () => void domain.close())
+    ctx.effect(() => () => void domain?.close())
 
     // /handoff 命令注册；register 返回反注册函数，交给 fiber 管理
     ctx.effect(() =>
@@ -54,7 +54,7 @@ export async function apply(ctx: HandoffContext): Promise<void> {
             llm: ctx.llm,
             agentDefaultModel: ctx.agentDefaultModel,
           },
-          domain,
+          domain: domain!,
         }),
       ),
     )
@@ -68,15 +68,18 @@ export async function apply(ctx: HandoffContext): Promise<void> {
           agentDefaultModel: ctx.agentDefaultModel,
           tools: ctx.tools,
         },
-        domain,
+        domain: domain!,
       }),
     )
 
     // M3：client 列表视图的数据与动作面
-    ctx.effect(() => mountBoardRoutes(ctx, domain))
+    ctx.effect(() => mountBoardRoutes(ctx, domain!))
 
     ctx.logger?.info?.('[dsh-handoff-board] 交接板就绪：/handoff 已注册，账本 handoff_board 已打开，四工具已上线，路由 /handoff-board/* 已挂载')
   } catch (e) {
+    // 兜底：apply 中途失败时 domain 可能已打开——不关闭会把 storageDomain 锁死
+    // （already-open），热重载/重注入全失败直到重启宿主。close 幂等，失败也吞掉。
+    if (domain) void domain?.close().catch(() => { })
     console.error('[dsh-handoff-board] APPLY FAIL 原始堆栈:', (e as Error)?.stack ?? String(e))
     throw e
   }

@@ -2,3 +2,8 @@ node_modules/
 lib/
 *.tsbuildinfo
 *.tgz
+
+.npm-cache/
+.hbstate.json
+.scratch/*.bak-*
+.scratch/*latest*.json

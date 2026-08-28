@@ -33,7 +33,7 @@ export function buildBoardTools(deps: ToolsDeps) {
   const boardTool = defineTool({
     name: 'board',
     description:
-      '【了解项目工作历史时用】返回交接板全部内容：按线程分组的交接条清单（日期｜标题｜状态｜类型｜文件数｜id），时间倒序。新会话开工前的第一入口。',
+      '【开工第一入口】交接板总览：按关联族分组的交接条清单（日期｜标题｜状态｜类型｜文件数｜id），时间倒序。',
     parameters: {},
     output: {
       schema: { type: 'json' },
@@ -69,7 +69,7 @@ export function buildBoardTools(deps: ToolsDeps) {
   // ── read_handoff：单条全文 ──
   const readTool = defineTool({
     name: 'read_handoff',
-    description: '【需要某条交接的完整细节时用】读取一条交接条的六段全文。id 可用 board 返回的前 8 位前缀。',
+    description: '【看某条细节】读取一条交接条的六段全文。id 用 board 返回的前 8 位前缀。',
     parameters: {
       id: { type: 'string', required: true, description: '交接条 id 或其前缀' },
     },
@@ -93,7 +93,7 @@ export function buildBoardTools(deps: ToolsDeps) {
   const writeTool = defineTool({
     name: 'write_handoff',
     description:
-      '【阶段完成或会话暴毙需要交接时用】为指定会话生成六段交接条入库。不传 session_id=总结当前会话；传入其他会话 id 可为暴毙/无法继续的会话补条——工人独立调用，不依赖该会话可用。',
+      '【收尾/暴毙交接】为会话生成六段交接条；不传=当前会话，传其他 id=为暴毙会话补条。',
     parameters: {
       session_id: { type: 'string', description: '要总结的会话 id；缺省=当前会话' },
     },
@@ -118,7 +118,7 @@ export function buildBoardTools(deps: ToolsDeps) {
   const whoElseTool = defineTool({
     name: 'who_else',
     description:
-      '【改文件之前用】撞车检查：还有哪些「活着」的其他会话最近触碰过给定路径？（剔除调用者自身；仅查存活会话）',
+      '【改文件前】撞车检查：还有哪些活会话近期碰过该路径（剔除自己）。',
     parameters: {
       path: { type: 'string', required: true, description: '文件路径或其子串' },
     },
