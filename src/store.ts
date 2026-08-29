@@ -40,6 +40,17 @@ export interface NoteRow {
   provenance: 'curated' | 'raw'
 }
 
+/** 接续血缘：一次「开新对话接续」= 一条 link（子会话 ← 来源会话）。
+ * 2026-08-29 起接续不再写 header.parentSession（宿主子代理专用字段），
+ * 新血缘全落本表；存量接续会话由读取侧回退 header 兼容。 */
+export interface LinkRow {
+  childSessionId: string
+  parentSessionId: string
+  /** 触发接续的交接条 */
+  noteId: string
+  createdAt: number
+}
+
 /** FleetingEcho pathSlug：非法字符折叠为 `-`，超长取尾部+hash 防碰撞 */
 export function pathSlug(abs: string): string {
   let s = abs.replace(/[^A-Za-z0-9._-]+/g, '-')
@@ -84,12 +95,20 @@ const noteSchema = z.object({
   provenance: z.enum(['curated', 'raw']),
 })
 
+const linkSchema = z.object({
+  childSessionId: z.string(),
+  parentSessionId: z.string(),
+  noteId: z.string(),
+  createdAt: z.number(),
+})
+
 export const boardSpec = defineDomain({
   name: 'handoff_board',
   version: 1,
   tables: {
     threads: domainTable(threadSchema),
     notes: domainTable(noteSchema),
+    links: domainTable(linkSchema),
   },
 })
 
@@ -100,4 +119,11 @@ export async function openBoard(ctx: {
   storageDomain: { open(spec: unknown): Promise<unknown> }
 }): Promise<BoardDomain> {
   return ctx.storageDomain.open(boardSpec) as Promise<BoardDomain>
+}
+
+/** 会话的接续来源：links 表优先（v0.0.3+ 新数据），回退 header.parentSession
+ * （存量接续会话；子代理的 header 字段是宿主写的真实血缘，天然走回退分支）。 */
+export function parentOfSession(domain: BoardDomain, sessionId: string, headerParent?: string): string {
+  const link = domain.table('links').get(sessionId) as LinkRow | undefined
+  return link?.parentSessionId || headerParent || ''
 }

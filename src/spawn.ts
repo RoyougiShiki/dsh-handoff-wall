@@ -1,10 +1,10 @@
 /**
  * 会话接续：从一条交接条开出新对话，六段全文作为首条注入消息。
  * 链路采纳 WeiYe6 流程并修三 bug（结构化血缘走 meta.parentSession，
- * 不靠客户端散文正则）。attachSession 失败不静默：warning 回传给调用方。
- *
- * 模式/工具：必须走与官方 session.create 相同的两步——header 写入
- * agentPreset（左上角模式名读这个字段），setup 里 agentPresets.mount
+ * 链路采纳 WeiYe6 流程并修三 bug（结构化血缘走账本 links 表，
+ * 不靠客户端散文正则，也不写 header.parentSession——那是宿主子代理专用字段，
+ * 写在主会话上会污染宿主语义并让 session-title 跳过自动起标题）。
+ * attachSession 失败不静默：warning 回传给调用方。
  * （bash/fs/skill/subagent 等模型工具都在 preset 组装里，不 mount 就没有）。
  * 只写 header 不 mount = 有名字没工具；只 mount 不写 header = 有工具没名字。
  * header 必须在 create 的 meta 里带上：session 边界在异步 setup 之前快照 meta，
@@ -141,7 +141,6 @@ export async function continueWithNote(
     sessionId: newSessionId,
     meta: {
       cwd,
-      parentSession: note.sessionId,
       ...composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset },
     },
     ...composition.setup === undefined ? {} : { setup: composition.setup },
@@ -149,6 +148,20 @@ export async function continueWithNote(
 
   // 归组到工作区；失败收集为警告（宿主类型确认：不归组则输入框置灰）
   let warning = composition.warning
+
+  // 接续血缘落账本（links 表）：不写 header.parentSession（宿主子代理专用字段，
+  // 写在主会话上会污染宿主语义、并让 session-title 跳过自动起标题）。
+  // 写失败不回滚会话——只降级为警告（链可能断，但会话本身可用）。
+  try {
+    await domain.table('links').put(newSessionId, {
+      childSessionId: newSessionId,
+      parentSessionId: note.sessionId,
+      noteId: note.id,
+      createdAt: Date.now(),
+    })
+  } catch (e) {
+    warning = joinWarnings(warning, '接续血缘写入失败：' + String(e).slice(0, 120) + '（新会话已创建，但交接关系链可能断链）')
+  }
   try {
     if (cwd) {
       const ws = await deps.ctx.workspaceRegistry.resolveByPath(cwd).catch(() => undefined)

@@ -184,6 +184,16 @@ export function mountBoardRoutes(ctx: RouteDeps['ctx'], domain: BoardDomain): ()
     const sessionMap = new Map(
       (await listSessionsCached(ctx.sessionQuery as never)).map((r: any) => [r.header.id, r]),
     )
+    // 接续血缘：links 表优先（v0.0.3+），回退 header.parentSession（存量接续会话）；
+    // 子代理的 header.parentSession 是宿主写的真实血缘，走回退分支不受影响
+    const linkParent = new Map(
+      [...domain.table('links').entries()].map(([, r]) => {
+        const link = r as { childSessionId: string; parentSessionId: string }
+        return [link.childSessionId, link.parentSessionId]
+      }),
+    )
+    const parentOf = (sessionId: string): string =>
+      linkParent.get(sessionId) ?? sessionMap.get(sessionId)?.header?.parentSession ?? ''
     tMs.list = Date.now() - tL
     const statusOf = (sessionId: string): string => {
       const s = sessionMap.get(sessionId)
@@ -211,7 +221,7 @@ export function mountBoardRoutes(ctx: RouteDeps['ctx'], domain: BoardDomain): ()
         status: statusOf(n.sessionId),
         // 来源会话在磁盘上已不存在（日志被清理）：打开原对话不可用，标记给客户端
         missing: !sessionMap.has(n.sessionId),
-        parentSessionFull: sessionMap.get(n.sessionId)?.header?.parentSession ?? '',
+        parentSessionFull: parentOf(n.sessionId),
         kind: (sessionMap.get(n.sessionId)?.header?.origin === 'subagent') ? 'subagent' : 'main',
       }))
       .filter((n: any) => {
@@ -237,7 +247,7 @@ export function mountBoardRoutes(ctx: RouteDeps['ctx'], domain: BoardDomain): ()
         cwd: r.header.cwd ?? '',
         dirName: dirName(r.header.cwd),
         projectKey: resolveProjectKeyCached(r.header.cwd),
-        parentSessionFull: r.header.parentSession ?? '',
+        parentSessionFull: parentOf(r.header.id),
         title: (r.header as any)?.title ?? (r as any)?.title ?? '',
       }))
     const unnoted = current

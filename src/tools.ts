@@ -55,6 +55,7 @@ export function buildBoardTools(deps: ToolsDeps) {
         if (tn.length === 0) continue
         out.push(`\n## ${t.title}（线程 ${t.id.slice(0, 8)}）`)
         for (const n of tn) {
+          if (!sessionMap.has(n.sessionId)) continue // 死条隐藏（2026-08-28 用户规则：来源会话已不存在=显示无意义）
           const info = infoOf(sessionMap, n.sessionId)
           const parent = n.parentSessionId ? ` ←父${n.parentSessionId.replace(/^session-/, '').slice(0, 8)}` : ''
           out.push(

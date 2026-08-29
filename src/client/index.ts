@@ -388,7 +388,9 @@ function buildTree(nodes: TNode[]): Fam[] {
   const childrenOf = new Map<string, TNode[]>()
   const roots: TNode[] = []
   for (const n of nodes) {
-    const p = n.parentSessionId
+    // 只有子代理是真正的「子会话」；接续出的主会话不是原会话的子代理（2026-08-29
+    // 用户裁决），一律根级显示，不得折进原会话子树。接续关系只在交接关系画布表达。
+    const p = n.kind === 'subagent' ? n.parentSessionId : ''
     if (p && bySid.has(p)) {
       const list = childrenOf.get(p) ?? []
       list.push(n)
@@ -798,7 +800,7 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
           }, canvasNode),
         ]),
         rc('div', { key: 'trz', className: 'hb-zone' }, [
-          rc('div', { key: 'trh', className: 'hb-zone-head' }, `会话树 · 父在上、子会话缩进在下（${totalNotes} 交接 / ${totalPh} 未交接）`),
+          rc('div', { key: 'trh', className: 'hb-zone-head' }, `会话树 · 子代理缩进在父下，接续会话为独立根节点（${totalNotes} 交接 / ${totalPh} 未交接）`),
           rc('div', { key: 'tr', className: 'hb-tree' }, treeNode),
         ]),
       ]),
@@ -906,7 +908,6 @@ function renderNoteChain(chain: NoteChain, ctx: RenderCtx, depth: number): any {
       n.status === '进行中' ? rc('span', { key: 'lv', className: 'hb-badge live' }, '进行中') : null,
       n.sessionId === ctx.selfSid && ctx.selfSid ? rc('span', { key: 'sf', className: 'hb-badge self' }, '当前') : null,
       chain.kids.length > 0 ? rc('span', { key: 'fk', className: 'hb-badge fork' }, `延续 ${chain.kids.length} 个会话`) : null,
-      chain.kids.length > 0 ? rc('span', { key: 'fk', className: 'hb-badge fork' }, `续出 ${chain.kids.length}`) : null,
       rc('span', { key: 'id', className: 'hb-id' }, short8(n.sessionId)),
     ]),
   ])

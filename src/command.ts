@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { BoardDomain, NoteRow, ThreadRow } from './store.js'
-import { resolveProjectKey } from './store.js'
+import { parentOfSession, resolveProjectKey } from './store.js'
 import { buildWorkerSystem, validateSections } from './prompt.js'
 import { redact } from './redact.js'
 
@@ -103,6 +103,9 @@ export function extractMaterial(events: any[]): MaterialResult {
   for (const e of events) {
     const type = e?.type ?? ''
     if (type !== 'user/message' && type !== 'assistant/message') continue
+    // 插件注入消息（接续全文/通知）不是人类对话：混进取材会让交接条逐轮复读膨胀
+    // （2026-08-28 事故：接续注入的上一条全文被工人再总结进新条，874字→2290字循环增长）
+    if (e?.data?.source?.kind === 'plugin') continue
     const text = eventPlainText(e)
     if (!text.trim()) continue
 
@@ -294,7 +297,7 @@ export async function generateHandoff(
   const title = deriveTitle(material.firstUserText)
   const { note, thread } = await saveHandoff(deps.domain, {
     sessionId,
-    parentSessionId: (header as any).parentSession ?? '',
+    parentSessionId: parentOfSession(deps.domain, sessionId, (header as any).parentSession),
     cwd: header.cwd,
     title,
     body,
