@@ -78,6 +78,12 @@ fi
 TSC="$CHECKOUT/node_modules/.bin/tsc"
 if [ ! -x "$TSC" ] && [ ! -f "$TSC.cmd" ]; then TSC="./node_modules/.bin/tsc"; fi
 "$TSC" -p tsconfig.json
+# client 不在主 tsconfig 里（tsdown 纯转译不做类型检查）——单独跑一道，
+# 否则孤儿引用/未定义变量会直接溜进发布包（v0.0.4 "p is not defined" 事故）
+echo "=== Type-checking client (src/client excluded from main tsc) ==="
+./node_modules/.bin/tsc --noEmit --strict --skipLibCheck \
+  --target ES2023 --module ESNext --moduleResolution bundler \
+  --lib ES2023,DOM --jsx react src/client/index.ts
 echo "=== Bundling host+client (tsdown) ==="
 "$ROOT/node_modules/.bin/tsdown"
 echo "=== Build complete ==="

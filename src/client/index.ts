@@ -433,7 +433,7 @@ function pruneToNotes(fams: Fam[]): Fam[] {
 }
 /* ── 主应用 ── */
 /* 渲染错误边界：任何渲染异常都浮出到界面，不再白屏 */
-class HBErrorBoundary extends Component<{ children: any }, { err: string | null }> {
+class HBErrorBoundary extends Component<{ children?: any }, { err: string | null }> {
   state = { err: null }
   static getDerivedStateFromError(e: any) { return { err: String((e && e.message) || e) } }
   componentDidCatch(e: any) { try { console.error('[hb] render error', e) } catch (_) { /* ignore */ } }
@@ -662,28 +662,20 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
   const allNodes = assembleNodes(state)
   const firstThreadId = threads[0]?.id ?? ''
   const selected = allNodes.find((n) => n.key === selectedKey) ?? null
-    while (p) {
-      const pn = bySid.get(p)
-      if (!pn || seen.has(p)) break
-      seen.add(p)
-      if (pn.kind !== 'subagent') break // 父链只沿子代理链爬（与 kinshipOf 一致）
-      parents.push(pn)
-      p = kinshipOf(pn, bySid)
-    }
   // 血缘唯一真源：与 buildTree/kinshipOf 同一规则——只有子代理是「子会话」；
   // 接续关系不算父子，另列为「关联交接」（信息不丢但不再冒充子会话）。
   const relatives = (() => {
     if (!selected) return null
     const parents: TNode[] = []
     const seen = new Set<string>()
+    const bySid = new Map(allNodes.map((n) => [n.sessionId, n]))
     let p = kinshipOf(selected, bySid)
     while (p) {
       const pn = bySid.get(p)
       if (!pn || seen.has(p)) break
       seen.add(p)
-      if (pn.kind !== 'subagent') break // 父链只沿子代理链爬（与 kinshipOf 一致）
-      parents.push(pn)
-      p = pn.parentSessionId
+      parents.push(pn) // 先入列：顶头父会话可能是主会话（子代理的父本来就是主会话）
+      p = kinshipOf(pn, bySid) // pn 非子代理时返回 ''，链自然止于此
     }
     const children: TNode[] = []
     const continuations: TNode[] = []
@@ -988,7 +980,7 @@ function DetailPanel(props: {
   node: TNode
   busy: boolean
   relatives: { parents: TNode[]; children: TNode[]; continuations: TNode[] } | null
-  onOpenSource(sid: string): void
+  onOpenSource(sid: string, missing?: boolean): void
   onContinue(note: NoteV): Promise<void>
   onGenerate(sid: string): Promise<void>
   onLocate(key: string): void
