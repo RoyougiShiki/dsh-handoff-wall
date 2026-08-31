@@ -388,9 +388,10 @@ function buildTree(nodes: TNode[]): Fam[] {
   const childrenOf = new Map<string, TNode[]>()
   const roots: TNode[] = []
   for (const n of nodes) {
-    // 只有子代理是真正的「子会话」；接续出的主会话不是原会话的子代理（2026-08-29
-    // 用户裁决），一律根级显示，不得折进原会话子树。接续关系只在交接关系画布表达。
-    const p = n.kind === 'subagent' ? n.parentSessionId : ''
+    // 血缘唯一真源 kinshipOf：只有子代理是真正的「子会话」（2026-08-29
+    // 用户裁决）；接续出的主会话不是原会话的子代理，一律根级显示，
+    // 接续关系只在「交接关系」画布与详情「关联交接」区表达。
+    const p = kinshipOf(n, bySid)
     if (p && bySid.has(p)) {
       const list = childrenOf.get(p) ?? []
       list.push(n)
@@ -405,6 +406,17 @@ function buildTree(nodes: TNode[]): Fam[] {
     children: (childrenOf.get(n.sessionId) ?? []).sort((a, b) => a.createdAt - b.createdAt).map(toFam),
   })
   return roots.map(toFam)
+}
+
+/** 血缘唯一真源：返回节点在「会话树」语义下的父会话 id。
+ * 仅子代理拥有树父子关系（父链也只沿子代理链爬）；主会话（含接续会话）恒为根。
+ * buildTree 与详情面板 relatives 共用本函数——修血缘 bug 只改这里。 */
+function kinshipOf(node: TNode, bySid: Map<string, TNode>): string {
+  if (node.kind !== 'subagent') return ''
+  const p = node.parentSessionId
+  const parent = p ? bySid.get(p) : undefined
+  // 父失联的孤儿子代理由 treeNodes 过滤层兜底显示为根，不在此处处理
+  return parent ? p : ''
 }
 
 /** 只保留「交接条」节点成延续链：ph(未交接)/ext(外部) 中间节点裁掉，其下的交接条上浮接上；
@@ -649,24 +661,40 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
   const noProject = !state.current
   const allNodes = assembleNodes(state)
   const firstThreadId = threads[0]?.id ?? ''
-  assignThreads(allNodes, firstThreadId)
   const selected = allNodes.find((n) => n.key === selectedKey) ?? null
+    while (p) {
+      const pn = bySid.get(p)
+      if (!pn || seen.has(p)) break
+      seen.add(p)
+      if (pn.kind !== 'subagent') break // 父链只沿子代理链爬（与 kinshipOf 一致）
+      parents.push(pn)
+      p = kinshipOf(pn, bySid)
+    }
+  // 血缘唯一真源：与 buildTree/kinshipOf 同一规则——只有子代理是「子会话」；
+  // 接续关系不算父子，另列为「关联交接」（信息不丢但不再冒充子会话）。
   const relatives = (() => {
     if (!selected) return null
-    const bySid = new Map(allNodes.map((n) => [n.sessionId, n]))
     const parents: TNode[] = []
     const seen = new Set<string>()
-    let p = selected.parentSessionId
-    while (p && bySid.has(p) && !seen.has(p)) {
+    let p = kinshipOf(selected, bySid)
+    while (p) {
+      const pn = bySid.get(p)
+      if (!pn || seen.has(p)) break
       seen.add(p)
-      const pn = bySid.get(p)!
+      if (pn.kind !== 'subagent') break // 父链只沿子代理链爬（与 kinshipOf 一致）
       parents.push(pn)
       p = pn.parentSessionId
     }
     const children: TNode[] = []
-    for (const n of allNodes) if (n.parentSessionId === selected.sessionId) children.push(n)
+    const continuations: TNode[] = []
+    for (const n of allNodes) {
+      if (n.parentSessionId !== selected.sessionId) continue
+      if (n.kind === 'subagent') children.push(n)
+      else continuations.push(n)
+    }
     children.sort((a, b) => a.createdAt - b.createdAt)
-    return { parents, children }
+    continuations.sort((a, b) => a.createdAt - b.createdAt)
+    return { parents, children, continuations }
   })()
   // canvasDragRef 已在组件顶层声明（hooks 规则：数量与顺序每次渲染必须一致）
   const onCanvasMouseDown = (e: any): void => {
@@ -959,7 +987,7 @@ function renderTreeRow(fam: Fam, ctx: RenderCtx, depth: number): any {
 function DetailPanel(props: {
   node: TNode
   busy: boolean
-  relatives: { parents: TNode[]; children: TNode[] } | null
+  relatives: { parents: TNode[]; children: TNode[]; continuations: TNode[] } | null
   onOpenSource(sid: string): void
   onContinue(note: NoteV): Promise<void>
   onGenerate(sid: string): Promise<void>
@@ -990,6 +1018,17 @@ function DetailPanel(props: {
                 key: c.key,
                 className: 'hb-rel-item' + (c.type === 'note' ? '' : ' ph'),
                 title: '点击' + (c.type === 'note' ? '跳转到上方对应交接' : '查看这个会话'),
+                onClick: () => props.onLocate(c.key),
+              }, `${c.type === 'note' ? '⚡' : '○'} ${(c.title || short8(c.sessionId)).slice(0, 16)}`)),
+        ]),
+        rc('div', { key: 'k', className: 'hb-rel-row' }, [
+          rc('span', { key: 'r', className: 'hb-rel-role' }, '关联交接'),
+          rel.continuations.length === 0
+            ? rc('span', { key: 'n', className: 'hb-rel-none' }, '无')
+            : rel.continuations.map((c) => rc('button', {
+                key: 'cont-' + c.key,
+                className: 'hb-rel-item' + (c.type === 'note' ? '' : ' ph'),
+                title: '本会话的交接条被接续出的新会话（点击查看）',
                 onClick: () => props.onLocate(c.key),
               }, `${c.type === 'note' ? '⚡' : '○'} ${(c.title || short8(c.sessionId)).slice(0, 16)}`)),
         ]),
