@@ -84,6 +84,8 @@ async function postJSON(path: string, body: unknown): Promise<any> {
 const STYLE_CSS = `
 .hb-wrap{font-size:13px;color:var(--dsw-alias-label-primary);height:100%;flex:1 1 auto;min-height:0;
   display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden}
+/* wrap 高度由 JS 动态测量设置（inline style 覆盖 height:100%）：
+ * 高度 = 最近滚动容器可视高 − wrap 顶部偏移，适配任意窗口/布局。 */
 .hb-head{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
   padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l2);
   background:color-mix(in srgb,var(--dsw-alias-bg-base) 88%,transparent);backdrop-filter:blur(8px)}
@@ -104,31 +106,42 @@ const STYLE_CSS = `
 /* 两栏主体：左时间线 + 右详情，各自独立滚动、互不影响 */
 .hb-body{display:flex;flex:1;min-height:0;overflow:hidden}
 .hb-timeline{flex:1;min-width:0;min-height:0;overflow:auto;padding:14px 18px 40px}
-.hb-detail{width:392px;flex:none;min-height:0;overflow:auto;padding:14px 16px 40px;
+.hb-detail{width:392px;flex:none;min-height:0;overflow:auto;padding:14px 16px 40px;height:100%;box-sizing:border-box;
   border-left:1px solid var(--dsw-alias-border-l2);
   background:color-mix(in srgb,var(--dsw-alias-label-primary) 2%,transparent)}
 
 /* 线程块 */
 /* ===== v0.8 三区布局：交接关系 + 会话树 ===== */
-.hb-left{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+.hb-left{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;height:100%;overflow:hidden}
 .hb-zone{display:flex;flex-direction:column;min-height:0;flex:1}
+/* 会话树折叠：吸底横条，不占画布高度 */
+.hb-zone-collapsed{flex:none;margin-top:auto;min-height:0}
+.hb-zone-collapsed .hb-zone-head{padding:6px 16px 6px}
 .hb-zone-head{flex:none;font-size:12px;font-weight:650;color:var(--dsw-alias-label-secondary);padding:9px 16px 3px;display:flex;align-items:center;gap:8px}
+.hb-zone-head-toggle{cursor:pointer;user-select:none}
+.hb-zone-head-toggle:hover{color:var(--dsw-alias-label-primary)}
 .hb-zone-head::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--dsw-alias-border-l2),transparent)}
 .hb-canvas{flex:1 1 58%;min-height:0;overflow:auto;padding:10px 16px 14px;cursor:grab}
 .hb-canvas:active{cursor:grabbing;user-select:none}
-.hb-canvas-inner{display:flex;flex-direction:column;gap:6px;min-width:max-content;width:max-content;min-height:100%}
-.hb-cn-row{display:flex;flex-direction:column;gap:2px}
-.hb-cn-kids{margin-left:26px;padding-left:16px;border-left:2px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 45%,transparent);display:flex;flex-direction:column;gap:4px}
-.hb-cn-edge{display:flex;flex-direction:column;gap:2px;position:relative}
-.hb-cn-edge::before{content:'';position:absolute;left:-16px;top:14px;width:14px;height:2px;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 60%,transparent)}
-.hb-cn-arrow{align-self:flex-start;font-size:10px;line-height:1;color:var(--dsw-alias-brand-primary);transform:translateX(-14px)}
+.hb-canvas-inner{min-width:max-content;width:max-content;min-height:100%}
+.hb-cn-chain-row{display:flex;flex-direction:column;margin-bottom:18px}
+/* 横向血缘树画布：绝对定位卡片 + SVG 贝塞尔连线层 */
+.hb-cn-canvas{position:relative;min-height:100%}
+.hb-cn-edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.hb-cn-bezier-path{fill:none;stroke:color-mix(in srgb,var(--dsw-alias-brand-primary) 55%,transparent);stroke-width:1.6;stroke-linecap:round}
+.hb-card.hb-cn{position:absolute;box-sizing:border-box;border-left-width:2px;border-radius:12px;box-shadow:0 1px 2px color-mix(in srgb,black 8%,transparent);overflow:hidden}
+.hb-card.hb-cn .top{display:flex;align-items:center;gap:6px;padding:10px 12px 4px}
+.hb-card.hb-cn .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:600}
+.hb-card.hb-cn .metarow{display:flex;align-items:center;gap:6px;padding:2px 12px 8px;flex-wrap:wrap}
+.hb-cn-edge:first-child .hb-cn-bezier{top:-62px}
 .hb-cn-dot{width:10px;height:10px;border-radius:50%;background:var(--dsw-alias-brand-primary);flex:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-brand-primary) 18%,transparent)}
 .hb-card.hb-cn{border-left-width:2px;border-radius:12px;box-shadow:0 1px 2px color-mix(in srgb,black 8%,transparent)}
 .hb-badge.relay{color:var(--dsw-alias-label-tertiary);border-style:dotted}
 .hb-tree{flex:1 1 42%;min-height:0;min-width:0;overflow:auto;border-top:1px solid var(--dsw-alias-border-l2);padding:6px 8px 12px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 40%,transparent)}
 .hb-tree-inner{display:flex;flex-direction:column;padding:2px 0}
 .hb-kids{display:flex;flex-direction:column}
-.hb-trow-group{font-size:11px;font-weight:600;color:var(--dsw-alias-label-tertiary);padding:10px 10px 3px;letter-spacing:.3px}
+.hb-trow-group{font-size:11px;font-weight:600;color:var(--dsw-alias-label-tertiary);padding:8px 10px 4px;letter-spacing:.3px;display:flex;align-items:center;gap:5px;background:transparent;border:none;width:100%;text-align:left;cursor:pointer;border-radius:7px;font-family:inherit}
+.hb-trow-group:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
 .hb-trow-group + .hb-trow{margin-top:2px}
 .hb-caret{border:none;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;
   width:18px;height:18px;padding:0;flex:none;display:inline-flex;align-items:center;justify-content:center}
@@ -452,7 +465,7 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
   const [busy, setBusy] = useState(false)
   const [reloading, setReloading] = useState(false)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set()) // 默认全折叠
+  const [expanded, setExpanded] = useState<Set<string>>(new Set()) // 默认折叠：expanded 记录「用户手动展开」的节点
   const [clanClosed, setClanClosed] = useState<Set<string>>(new Set()) // 血缘族框折叠
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const reqSeq = useRef(0)
@@ -481,45 +494,53 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
   }
 
   useEffect(() => { void reload() }, [sessionId])
-  // #3 右栏随左滚出视口：把板高度绑到最近滚动容器（conversation.view 承载即可滚动体），左右栏各自内滚
-  // 板高跟随最近滚动容器（conversation.view 承载即可滚动体）：左右栏各自内滚、
-  // 任何 DSH 布局变化（侧栏/右栏/窗口）后容器一 resize 就重新校准，绝不撑出外层原生滚动条
+  // 高度自动适配：wrap 高度 = 最近滚动容器可视高 − wrap 顶部偏移 − 输入栏高。
+  // 滚动容器/输入栏可能晚于挂载就绪 → 轮询等待 wrap 出现 + 延迟重试 + RO/resize 监听。
+  // 目标：左右栏各自滚动，外层永不出现公用长滚动条。
   useEffect(() => {
     if (typeof document === 'undefined') return
-    let resizeObs: ResizeObserver | null = null
-    const bind = (): void => {
-      const wrap = document.querySelector('.hb-wrap') as HTMLElement | null
-      if (!wrap || wrap.offsetParent === null) return
-      let el = wrap.parentElement
-      while (el && el !== document.body) {
-        const cs = getComputedStyle(el)
-        if (/auto|scroll|overlay/.test(cs.overflowY)) break
-        el = el.parentElement
+    let disposed = false
+    let active = false
+    const start = (): void => {
+      if (disposed || active) return
+      active = true
+      const sync = (): void => {
+        // 每次重新查询：reload 后 React 可能重建 DOM，缓存引用会指向已卸载节点
+        const wrap = document.querySelector('.hb-wrap') as HTMLElement | null
+        if (!wrap || wrap.offsetParent === null) return
+        let el = wrap.parentElement
+        let scroller: HTMLElement | null = null
+        while (el && el !== document.body) {
+          const cs = getComputedStyle(el)
+          if (/auto|scroll|overlay/.test(cs.overflowY)) { scroller = el; break }
+          el = el.parentElement
+        }
+        if (!scroller || scroller.clientHeight <= 0) return
+        const offset = Math.max(0, Math.round(wrap.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop))
+        const seat = scroller.querySelector('.wSkVaW_composerSeat')
+        const seatH = seat ? seat.getBoundingClientRect().height : 0
+        const h = scroller.clientHeight - offset - seatH
+        if (h > 200 && Math.abs(wrap.getBoundingClientRect().height - h) > 2) {
+          wrap.style.height = h + 'px'
+        }
       }
-      const target = el && el !== document.body && el.clientHeight > 100 ? el : null
-      if (!target) {
-        const f = window.innerHeight - 90
-        if (Math.abs(wrap.getBoundingClientRect().height - f) > 2) wrap.style.height = f + 'px'
-        return
-      }
-      // 关键：容器内除板之外还有 shell 固定内容（如 composerSeat 输入栏），
-      // 板高 = 容器可视高 − 其他内容高，保证 scrollHeight <= clientHeight（外层永不滚动）
-      let otherH = 0
-      for (const child of Array.from(target.children)) {
-        if (child === wrap || child.contains(wrap)) continue
-        if (child instanceof HTMLElement) otherH += child.offsetHeight
-      }
-      const h = Math.max(100, target.clientHeight - otherH - 2)
-      if (Math.abs(wrap.getBoundingClientRect().height - h) > 2) wrap.style.height = h + 'px'
-      if (!resizeObs && typeof ResizeObserver !== 'undefined') {
-        resizeObs = new ResizeObserver(() => bind())
-        resizeObs.observe(target)
+      sync()
+      const retries = [150, 400, 900, 1800].map((ms) => setTimeout(sync, ms))
+      const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(sync) : null
+      if (ro) ro.observe(document.body)
+      window.addEventListener('resize', sync)
+      ;(wrap as any).__hbCleanup = () => {
+        retries.forEach((t) => clearTimeout(t))
+        window.removeEventListener('resize', sync)
+        ro?.disconnect()
       }
     }
-    bind()
-    const onResize = (): void => bind()
-    window.addEventListener('resize', onResize)
-    return () => { window.removeEventListener('resize', onResize); resizeObs?.disconnect() }
+    start()
+    return () => {
+      disposed = true
+      const wrap = document.querySelector('.hb-wrap') as HTMLElement | null
+      if (wrap && (wrap as any).__hbCleanup) { ;(wrap as any).__hbCleanup(); delete (wrap as any).__hbCleanup }
+    }
   }, [state])
   useEffect(() => {
     const timer = setInterval(() => {
@@ -617,6 +638,19 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
     })
   }
 
+  // 时间组（今天/昨天/7天内/更早）折叠状态：默认折叠，点组标题展开；
+  // 全部折叠时整棵会话树只显示各组标题一条，不挤占上方交接画布
+  const [groupsOpen, setGroupsOpen] = useState<Set<string>>(new Set())
+  // 会话树整区折叠：收起时整个 zone 只显示标题行（不挤占上方交接画布）
+  const [treeZoneOpen, setTreeZoneOpen] = useState(false)
+  const toggleGroup = (label: string): void => {
+    setGroupsOpen((prev) => {
+      const next = new Set(prev)
+      if (next.has(label)) next.delete(label); else next.add(label)
+      return next
+    })
+  }
+
   const toggleClan = (key: string): void => {
     setClanClosed((prev) => {
       const next = new Set(prev)
@@ -677,6 +711,12 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
       parents.push(pn) // 先入列：顶头父会话可能是主会话（子代理的父本来就是主会话）
       p = kinshipOf(pn, bySid) // pn 非子代理时返回 ''，链自然止于此
     }
+    // ↑ 交接自：本会话从哪个会话接续而来（仅接续主会话有；子代理的来源即血缘父，已在 parents）
+    const continuedFrom: TNode[] = []
+    if (selected.kind !== 'subagent' && selected.parentSessionId) {
+      const src = bySid.get(selected.parentSessionId)
+      if (src && !seen.has(src.sessionId)) continuedFrom.push(src)
+    }
     const children: TNode[] = []
     const continuations: TNode[] = []
     for (const n of allNodes) {
@@ -686,7 +726,7 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
     }
     children.sort((a, b) => a.createdAt - b.createdAt)
     continuations.sort((a, b) => a.createdAt - b.createdAt)
-    return { parents, children, continuations }
+    return { parents, children, continuations, continuedFrom }
   })()
   // canvasDragRef 已在组件顶层声明（hooks 规则：数量与顺序每次渲染必须一致）
   const onCanvasMouseDown = (e: any): void => {
@@ -731,7 +771,9 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
       const chains = buildNoteChains(allNodes)
       canvasNode = chains.length === 0
       ? rc('div', { className: 'hb-empty sm' }, '当前工作区还没有交接条。')
-      : rc('div', { key: 'cvs', className: 'hb-canvas-inner' }, chains.map((c) => renderNoteChain(c, ctx, 0)))
+      : rc('div', { key: 'cvs', className: 'hb-canvas-inner' }, [
+          ...chains.map((c) => rc('div', { key: 'row-' + c.node.key, className: 'hb-cn-chain-row' }, renderNoteChain(c, ctx, 0))),
+        ])
     }
   // 只显示「本工作区主会话 + 父在集合内的子代理 + 交接条」：
   // 主会话（kind=main）是本工作区自己的对话，一律显示（就是 dsh 会话列表里的那些）；
@@ -772,8 +814,16 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
   }
   const treeRows: any[] = []
   for (const [label, list] of grouped) {
-    treeRows.push(rc('div', { key: 'grp-' + label, className: 'hb-trow-group' }, `${label} · ${list.length} 个会话`))
-    for (const f of list) treeRows.push(renderTreeRow(f, treeCtx, 0))
+    const groupOpen = groupsOpen.has(label)
+    treeRows.push(rc('button', {
+      key: 'grp-' + label,
+      className: 'hb-trow-group' + (groupOpen ? ' open' : ''),
+      onClick: () => toggleGroup(label),
+      title: groupOpen ? '折叠本组' : '展开本组',
+    }, `${groupOpen ? '▾' : '▸'} ${label} · ${list.length} 个会话`))
+    if (groupOpen) {
+      for (const f of list) treeRows.push(renderTreeRow(f, treeCtx, 0))
+    }
   }
   treeNode = fams.length === 0
     ? rc('div', { className: 'hb-empty sm' }, '没有可显示的会话：父会话失联或不在当前工作区的已隐藏，交接条留空。')
@@ -819,9 +869,28 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
             onMouseLeave: onCanvasMouseUp,
           }, canvasNode),
         ]),
-        rc('div', { key: 'trz', className: 'hb-zone' }, [
-          rc('div', { key: 'trh', className: 'hb-zone-head' }, `会话树 · 子代理缩进在父下，接续会话为独立根节点（${totalNotes} 交接 / ${totalPh} 未交接）`),
-          rc('div', { key: 'tr', className: 'hb-tree' }, treeNode),
+        rc('div', { key: 'trz', className: 'hb-zone' + (treeZoneOpen ? '' : ' hb-zone-collapsed') }, [
+          rc('div', {
+            key: 'trh',
+            className: 'hb-zone-head hb-zone-head-toggle',
+            onClick: () => setTreeZoneOpen(!treeZoneOpen),
+            title: treeZoneOpen ? '折叠会话树（只留标题行）' : '展开会话树',
+          }, [
+            (treeZoneOpen ? '▾ ' : '▸ ') + '会话树 · 子代理缩进在父下，接续会话为独立根节点（' + totalNotes + ' 交接 / ' + totalPh + ' 未交接）',
+            rc('button', {
+              key: 'exp',
+              className: 'hb-iconbtn',
+              title: groupsOpen.size > 0 ? '全部折叠' : '全部展开',
+              onClick: (e: any) => {
+                e.stopPropagation()
+                if (groupsOpen.size > 0) setGroupsOpen(new Set())
+                else setGroupsOpen(new Set(['今天', '昨天', '7 天内', '更早']))
+              },
+            }, groupsOpen.size > 0 ? '▾' : '▸'),
+          ]),
+          treeZoneOpen
+            ? rc('div', { key: 'tr', className: 'hb-tree' }, treeNode)
+            : null,
         ]),
       ]),
       rc('div', { key: 'dt', className: 'hb-detail' },
@@ -909,37 +978,85 @@ function buildNoteChains(all: TNode[]): NoteChain[] {
   return roots.sort((a, b) => a.node.createdAt - b.node.createdAt).map(build)
 }
 
-/* 画布：交接卡 + 承接箭头（节点自动纵排/分支，实线承接，未交接只作中转记号） */
+/* 画布：交接卡横向血缘树 + 贝塞尔承接连线（借鉴 dsh-synapse 观感）。
+ * 布局自动计算（根在左、子向右展开，卡片绝对定位但不可拖拽——
+ * 坐标由树结构推导，不持久化）；画布可平移（外层滚动）。 */
+const CN_W = 260
+const CN_H = 78
+const CN_GAP_X = 56
+const CN_GAP_Y = 14
+
+interface CnvCard { node: TNode; x: number; y: number }
+interface CnvEdge { fromKey: string; toKey: string; x1: number; y1: number; x2: number; y2: number }
+interface CnvLayout { w: number; h: number; cards: CnvCard[]; edges: CnvEdge[] }
+
+/** 递归布局：每个子树返回宽高、卡片坐标、连线端点（父卡右缘中 → 子卡左缘中）。 */
+function layoutNoteChain(chain: NoteChain, x: number, y: number): CnvLayout {
+  const cards: CnvCard[] = [{ node: chain.node, x, y }]
+  const edges: CnvEdge[] = []
+  let cursorY = y
+  let maxW = 0
+  let subH = CN_H
+  for (const kid of chain.kids) {
+    const sub = layoutNoteChain(kid, x + CN_W + CN_GAP_X, cursorY)
+    const fx = x + CN_W, fy = y + CN_H / 2
+    const tx = sub.cards[0]!.x, ty = sub.cards[0]!.y + CN_H / 2
+    edges.push({ fromKey: chain.node.key, toKey: kid.node.key, x1: fx, y1: fy, x2: tx, y2: ty })
+    cards.push(...sub.cards)
+    edges.push(...sub.edges)
+    cursorY = sub.cards[0]!.y + sub.h + CN_GAP_Y
+    maxW = Math.max(maxW, sub.w)
+    subH = Math.max(subH, cursorY - y)
+  }
+  return { w: CN_W + (maxW > 0 ? CN_GAP_X + maxW : 0), h: subH, cards, edges }
+}
+
 function renderNoteChain(chain: NoteChain, ctx: RenderCtx, depth: number): any {
-  const n = chain.node
-  const sel = ctx.selectedKey === n.key
-  const card = rc('div', {
-    key: 'c',
-    'data-hb-node': n.key,
-    className: 'hb-card hb-cn' + (sel ? ' sel' : '') + (n.sessionId === ctx.selfSid ? ' self' : '') + (n.status === '进行中' ? ' live' : ''),
-    onClick: () => ctx.onSelect(sel ? null : n.key),
-  }, [
-    rc('div', { key: 't', className: 'top' }, [
-      rc('span', { key: 'd', className: 'hb-cn-dot' }),
-      rc('div', { key: 't2', className: 't' }, (n.kind === 'subagent' ? '🤖 ' : '') + n.title.slice(0, 40)),
-      rc('span', { key: 'ti', className: 'hb-time-inline' }, fmt(n.createdAt)),
-    ]),
-    rc('div', { key: 'm', className: 'metarow' }, [
-      n.status === '进行中' ? rc('span', { key: 'lv', className: 'hb-badge live' }, '进行中') : null,
-      n.sessionId === ctx.selfSid && ctx.selfSid ? rc('span', { key: 'sf', className: 'hb-badge self' }, '当前') : null,
-      chain.kids.length > 0 ? rc('span', { key: 'fk', className: 'hb-badge fork' }, `延续 ${chain.kids.length} 个会话`) : null,
-      rc('span', { key: 'id', className: 'hb-id' }, short8(n.sessionId)),
-    ]),
-  ])
-  return rc('div', { key: 'ch-' + n.key, className: 'hb-cn-row' }, [
-    card,
-    chain.kids.length > 0
-      ? rc('div', { key: 'kids', className: 'hb-cn-kids' },
-          chain.kids.map((k) => rc('div', { key: 'kv-' + k.node.key, className: 'hb-cn-edge' }, [
-            rc('span', { key: 'ar', className: 'hb-cn-arrow' }, '▼'),
-            renderNoteChain(k, ctx, depth + 1),
-          ])))
-      : null,
+  const layout = layoutNoteChain(chain, 0, 0)
+  const selKey = ctx.selectedKey
+  const selfSid = ctx.selfSid
+  const cards = layout.cards.map((c) => {
+    const n = c.node
+    const sel = selKey === n.key
+    return rc('div', {
+      key: 'crd-' + n.key,
+      'data-hb-node': n.key,
+      className: 'hb-card hb-cn' + (sel ? ' sel' : '') + (n.sessionId === selfSid ? ' self' : '') + (n.status === '进行中' ? ' live' : ''),
+      style: { left: c.x + 'px', top: c.y + 'px', width: CN_W + 'px', height: CN_H + 'px' },
+      onClick: () => ctx.onSelect(sel ? null : n.key),
+    }, [
+      rc('div', { key: 't', className: 'top' }, [
+        rc('span', { key: 'd', className: 'hb-cn-dot' }),
+        rc('div', { key: 't2', className: 't' }, (n.kind === 'subagent' ? '🤖 ' : '') + n.title.slice(0, 40)),
+        rc('span', { key: 'ti', className: 'hb-time-inline' }, fmt(n.createdAt)),
+      ]),
+      rc('div', { key: 'm', className: 'metarow' }, [
+        n.status === '进行中' ? rc('span', { key: 'lv', className: 'hb-badge live' }, '进行中') : null,
+        n.sessionId === selfSid && selfSid ? rc('span', { key: 'sf', className: 'hb-badge self' }, '当前') : null,
+        chain.kids.length > 0 ? rc('span', { key: 'fk', className: 'hb-badge fork' }, `延续 ${chain.kids.length} 个会话`) : null,
+        rc('span', { key: 'id', className: 'hb-id' }, short8(n.sessionId)),
+      ]),
+    ])
+  })
+  const edgeSvg = layout.edges.length > 0
+    ? rc('svg', {
+        key: 'edges',
+        className: 'hb-cn-edges',
+        width: layout.w,
+        height: layout.h,
+        'aria-hidden': 'true',
+      }, layout.edges.map((e) => {
+        const bend = Math.min(40, Math.max(16, Math.abs(e.x2 - e.x1) * 0.3))
+        return rc('path', {
+          key: 'edg-' + e.fromKey + '-' + e.toKey,
+          d: 'M ' + e.x1 + ' ' + e.y1 + ' C ' + (e.x1 + bend) + ' ' + e.y1 + ', ' + (e.x2 - bend) + ' ' + e.y2 + ', ' + e.x2 + ' ' + e.y2,
+          className: 'hb-cn-bezier-path',
+        })
+      }))
+    : null
+  return rc('div', { key: 'cnv-' + chain.node.key, className: 'hb-cn-canvas', style: { width: layout.w + 'px', height: layout.h + 'px' } }, [
+    edgeSvg,
+    ...cards,
   ])
 }
 
@@ -947,7 +1064,7 @@ function renderNoteChain(chain: NoteChain, ctx: RenderCtx, depth: number): any {
 function renderTreeRow(fam: Fam, ctx: RenderCtx, depth: number): any {
   const n = fam.node
   const hasKids = fam.children.length > 0
-  const open = !ctx.expanded.has(n.key) // 默认全部展开；expanded 记录「用户手动折叠」的节点
+  const open = ctx.expanded.has(n.key) // 默认折叠；expanded 记录「用户手动展开」的节点
   const sel = ctx.selectedKey === n.key
   const disp = n.type === 'note'
     ? (n.title || short8(n.sessionId)).slice(0, 24)
@@ -979,7 +1096,7 @@ function renderTreeRow(fam: Fam, ctx: RenderCtx, depth: number): any {
 function DetailPanel(props: {
   node: TNode
   busy: boolean
-  relatives: { parents: TNode[]; children: TNode[]; continuations: TNode[] } | null
+  relatives: { parents: TNode[]; children: TNode[]; continuations: TNode[]; continuedFrom: TNode[] } | null
   onOpenSource(sid: string, missing?: boolean): void
   onContinue(note: NoteV): Promise<void>
   onGenerate(sid: string): Promise<void>
@@ -1014,13 +1131,24 @@ function DetailPanel(props: {
               }, `${c.type === 'note' ? '⚡' : '○'} ${(c.title || short8(c.sessionId)).slice(0, 16)}`)),
         ]),
         rc('div', { key: 'k', className: 'hb-rel-row' }, [
-          rc('span', { key: 'r', className: 'hb-rel-role' }, '关联交接'),
+          rc('span', { key: 'r', className: 'hb-rel-role' }, '↑ 交接自（前一个）'),
+          rel.continuedFrom.length === 0
+            ? rc('span', { key: 'n', className: 'hb-rel-none' }, '无')
+            : rel.continuedFrom.map((c) => rc('button', {
+                key: 'from-' + c.key,
+                className: 'hb-rel-item' + (c.type === 'note' ? '' : ' ph'),
+                title: '本会话由这个会话接续而来（点击查看）',
+                onClick: () => props.onLocate(c.key),
+              }, `${c.type === 'note' ? '⚡' : '○'} ${(c.title || short8(c.sessionId)).slice(0, 16)}`)),
+        ]),
+        rc('div', { key: 'k2', className: 'hb-rel-row' }, [
+          rc('span', { key: 'r', className: 'hb-rel-role' }, '↓ 被接续（后一个）'),
           rel.continuations.length === 0
             ? rc('span', { key: 'n', className: 'hb-rel-none' }, '无')
             : rel.continuations.map((c) => rc('button', {
                 key: 'cont-' + c.key,
                 className: 'hb-rel-item' + (c.type === 'note' ? '' : ' ph'),
-                title: '本会话的交接条被接续出的新会话（点击查看）',
+                title: '这个会话从本会话接续出去（点击查看）',
                 onClick: () => props.onLocate(c.key),
               }, `${c.type === 'note' ? '⚡' : '○'} ${(c.title || short8(c.sessionId)).slice(0, 16)}`)),
         ]),
