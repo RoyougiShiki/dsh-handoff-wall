@@ -131,7 +131,9 @@ export function mountBoardRoutes(ctx: RouteDeps['ctx'], domain: BoardDomain): ()
     (req: IncomingMessage, res: ServerResponse): void => {
       fn(req, res).catch((e) => {
         try {
-          json(res, 500, { ok: false, error: String(e).slice(0, 300) })
+          // 截断放宽：生成失败的错误串现在带分类标签 + 处置建议 + 各轮遥测，
+          // 300 字会把最关键的原因和建议切掉（用户看不到真因 = 变相静默失败）
+          json(res, 500, { ok: false, error: String(e).slice(0, 1600) })
         } catch { /* 已响应 */ }
       })
     }

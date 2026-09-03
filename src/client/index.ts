@@ -70,19 +70,31 @@ async function getJSON<T>(path: string): Promise<T> {
   return (await r.json()) as T
 }
 
-async function postJSON(path: string, body: unknown): Promise<any> {
-  const r = await fetch(BASE + path, {
-    method: 'POST',
-    cache: 'no-store',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  return r.json()
+async function postJSON(path: string, body: unknown, timeoutMs = 700_000): Promise<any> {
+  // 服务端最坏要跑三轮工人（150+210+240s），这里给足但必须给上限：
+  // 旧实现没有超时，请求挂住时 fetch 永不 settle，界面就一直停在「工人已开工」。
+  const ac = typeof AbortController !== 'undefined' ? new AbortController() : null
+  const timer = ac ? setTimeout(() => ac.abort(), timeoutMs) : undefined
+  try {
+    const r = await fetch(BASE + path, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      ...(ac ? { signal: ac.signal } : {}),
+    })
+    return await r.json()
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /* ── 主题令牌样式：全部取自 shell 的 --dsw-alias-*（ui-theme），明暗自动跟随 ── */
 const STYLE_CSS = `
-.hb-wrap{font-size:13px;color:var(--dsw-alias-label-primary);height:100%;flex:1 1 auto;min-height:0;
+/* flex-basis 必须是 0：原来是 auto（= 内容高度），右侧详情一变长就能把 wrap 顶大，
+   外层滚动容器被撑出公用滚动条，会话树被挤到可视区外（用户反馈的「滚动条随右侧
+   详情改变、会话树又要滚到底部」）。归零后 wrap 高度只由容器分配，与内容无关。 */
+.hb-wrap{font-size:13px;color:var(--dsw-alias-label-primary);height:100%;flex:1 1 0;min-height:0;
   display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden}
 /* wrap 高度由 JS 动态测量设置（inline style 覆盖 height:100%）：
  * 高度 = 最近滚动容器可视高 − wrap 顶部偏移，适配任意窗口/布局。 */
@@ -471,11 +483,13 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
   const reqSeq = useRef(0)
   const canvasDrag = useRef<{ x: number; y: number; sl: number; st: number } | null>(null) // 画布拖拽状态（hooks 必须稳定在组件顶层）
   const selInit = useRef(false) // 首次加载是否已默认选中当前会话
+  const resyncRef = useRef<(() => void) | null>(null) // state 变化后补测一次 wrap 高度（不重建观察者）
 
   const toast = (text: string, tone: 'ok' | 'err' = 'ok'): void => {
     const id = toastSeq++
     setToasts((t) => [...t.slice(-3), { id, text, tone }])
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'err' ? 6000 : 3600)
+    // 失败要带各轮遥测与处置建议，6 秒根本读不完；错误提示留 20 秒
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'err' ? 20000 : 3600)
   }
 
   const reload = async (): Promise<void> => {
@@ -499,49 +513,62 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
   // 目标：左右栏各自滚动，外层永不出现公用长滚动条。
   useEffect(() => {
     if (typeof document === 'undefined') return
-    let disposed = false
-    let active = false
-    const start = (): void => {
-      if (disposed || active) return
-      active = true
-      const sync = (): void => {
-        // 每次重新查询：reload 后 React 可能重建 DOM，缓存引用会指向已卸载节点
-        const wrap = document.querySelector('.hb-wrap') as HTMLElement | null
-        if (!wrap || wrap.offsetParent === null) return
-        let el = wrap.parentElement
-        let scroller: HTMLElement | null = null
-        while (el && el !== document.body) {
-          const cs = getComputedStyle(el)
-          if (/auto|scroll|overlay/.test(cs.overflowY)) { scroller = el; break }
-          el = el.parentElement
-        }
-        if (!scroller || scroller.clientHeight <= 0) return
-        const offset = Math.max(0, Math.round(wrap.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop))
-        const seat = scroller.querySelector('.wSkVaW_composerSeat')
-        const seatH = seat ? seat.getBoundingClientRect().height : 0
-        const h = scroller.clientHeight - offset - seatH
-        if (h > 200 && Math.abs(wrap.getBoundingClientRect().height - h) > 2) {
-          wrap.style.height = h + 'px'
-        }
-      }
-      sync()
-      const retries = [150, 400, 900, 1800].map((ms) => setTimeout(sync, ms))
-      const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(sync) : null
-      if (ro) ro.observe(document.body)
-      window.addEventListener('resize', sync)
-      ;(wrap as any).__hbCleanup = () => {
-        retries.forEach((t) => clearTimeout(t))
-        window.removeEventListener('resize', sync)
-        ro?.disconnect()
-      }
-    }
-    start()
-    return () => {
-      disposed = true
+    let raf = 0
+    let ro: ResizeObserver | null = null
+    const observed = new Set<Element>()
+    const retries: ReturnType<typeof setTimeout>[] = []
+
+    const sync = (): void => {
+      // 每次重新查询：reload 后 React 可能重建 DOM，缓存引用会指向已卸载节点
       const wrap = document.querySelector('.hb-wrap') as HTMLElement | null
-      if (wrap && (wrap as any).__hbCleanup) { ;(wrap as any).__hbCleanup(); delete (wrap as any).__hbCleanup }
+      if (!wrap || wrap.offsetParent === null) return
+      let el = wrap.parentElement
+      let scroller: HTMLElement | null = null
+      while (el && el !== document.body) {
+        const cs = getComputedStyle(el)
+        if (/auto|scroll|overlay/.test(cs.overflowY)) { scroller = el; break }
+        el = el.parentElement
+      }
+      if (!scroller || scroller.clientHeight <= 0) return
+      // 输入栏可能晚于挂载才出现；出现后纳入观察，否则它的高度变化收不到通知
+      const seat = scroller.querySelector('.wSkVaW_composerSeat')
+      for (const target of seat ? [scroller, seat] : [scroller]) {
+        if (ro && !observed.has(target)) { ro.observe(target); observed.add(target) }
+      }
+      const offset = Math.max(0, Math.round(wrap.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop))
+      const seatH = seat ? seat.getBoundingClientRect().height : 0
+      const h = scroller.clientHeight - offset - seatH
+      // 下限只防塌成 0，不再用 200 卡住修正（旧实现因此把错误高度永久冻结）
+      if (h > 80 && Math.abs(wrap.getBoundingClientRect().height - h) > 2) {
+        wrap.style.height = h + 'px'
+      }
     }
-  }, [state])
+    // rAF 合并：避免「写高度 → RO 回调 → 再写」的自激
+    const schedule = (): void => {
+      if (raf) return
+      raf = requestAnimationFrame(() => { raf = 0; sync() })
+    }
+    resyncRef.current = schedule
+
+    if (typeof ResizeObserver !== 'undefined') ro = new ResizeObserver(schedule)
+    schedule()
+    retries.push(...[150, 400, 900, 1800].map((ms) => setTimeout(schedule, ms)))
+    window.addEventListener('resize', schedule)
+
+    return () => {
+      retries.forEach((t) => clearTimeout(t))
+      window.removeEventListener('resize', schedule)
+      if (raf) cancelAnimationFrame(raf)
+      ro?.disconnect()
+      observed.clear()
+      resyncRef.current = null
+    }
+  }, [])
+
+  // state 变化后 React 可能重建 .hb-wrap 节点（inline height 随之丢失）——补测一次。
+  // 注意：只补测，不重建观察者（旧实现把 effect 依赖写成 [state]，每次 15s 轮询都
+  // 重新 observe 一次 body，且 cleanup 挂在 DOM 节点上拿不回来 → 监听器泄漏）。
+  useEffect(() => { resyncRef.current?.() }, [state])
   useEffect(() => {
     const timer = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return
@@ -611,10 +638,13 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
   const onGenerate = async (sid: string): Promise<void> => {
     if (busy) return
     setBusy(true)
-    toast('工人已开工：正在为该会话生成交接条（最长约 4 分钟）…')
+    toast('工人已开工：正在生成交接条（通常 1–5 分钟；全部重试最坏约 20 分钟，成功/失败都会在这里提示）…')
     try {
-      const r = await postJSON('/generate', { sessionId: sid })
-      if (!r.ok) { toast('生成失败：' + String(r.error).slice(0, 160), 'err'); return }
+      // 服务端最坏：r1 205s + r2 285s + r3 325s + 降级轮 325s ≈ 1140s，客户端超时必须大于它，
+      // 否则会在服务端还在跑时就先断开，只报一句无信息量的「生成异常」
+      const r = await postJSON('/generate', { sessionId: sid }, 1_250_000)
+      // 失败详情现在带各轮遥测，可能较长——err toast 停留 6s，截断放宽到 400 字
+      if (!r.ok) { toast('生成失败：' + String(r.error).slice(0, 400), 'err'); return }
       await reload()
       toast(`✅ 已生成并入库：「${String(r.title).slice(0, 20)}」`)
     } catch (e) {
