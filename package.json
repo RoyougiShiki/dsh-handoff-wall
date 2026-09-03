@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-handoff-board",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "DSH 会话间上下文交接与线程时间线可视化插件：换班写交接条，串成时间线，人和 AI 都能翻",
   "private": true,
   "type": "module",
