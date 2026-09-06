@@ -64,6 +64,17 @@ node ~/.agents/skills/dsh-model-config/scripts/validate-settings.mjs \
 注意：`maxTokens` 太小也不行——low 档下 3,000 token 会被思考吃光
 （思考 7,748 字、`finish=max-tokens`、正文 0 字）。要给足预算。
 
+### 4.1 教训：不要在插件里替用户决定档位
+
+2026-09-03 事故：为了绕开上面这个 296s 上限，我把交接工人的重试阶梯改成
+第 1 轮硬编码传 `effort: 'low'`。结果另一台机器上用户选的是 xhigh，却被按 low
+请求，而 `opencodezen / muse-spark-1.3-contributor-free` 未声明 low 档，
+第 1 轮直接被 `UNSUPPORTED_REASONING_EFFORT` 拒绝。
+
+**推理档位属于模型配置范畴，应该由用户在输入框/settings.yaml 里决定。
+插件不得固定档位，降档最多只能作为失败后的兜底。** 当前实现已恢复上游原样
+（前两轮尝试 `off`、第三轮不传档位）。
+
 ## 5. 取材预算对长会话压不下去
 
 `packTurns` 有「每轮保底 48 字符」，于是 `available` 下限是 `轮数 × 48`。

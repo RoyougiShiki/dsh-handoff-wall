@@ -638,11 +638,11 @@ function _BoardApp(props: { sessions?: SessionsApi; sessionId?: string }): any {
   const onGenerate = async (sid: string): Promise<void> => {
     if (busy) return
     setBusy(true)
-    toast('工人已开工：正在生成交接条（通常 1–5 分钟；全部重试最坏约 20 分钟，成功/失败都会在这里提示）…')
+    toast('工人已开工：正在生成交接条（最坏约 11 分钟，成功/失败都会在这里提示）…')
     try {
-      // 服务端最坏：r1 205s + r2 285s + r3 325s + 降级轮 325s ≈ 1140s，客户端超时必须大于它，
-      // 否则会在服务端还在跑时就先断开，只报一句无信息量的「生成异常」
-      const r = await postJSON('/generate', { sessionId: sid }, 1_250_000)
+      // 服务端最坏 = 三轮超时之和 + 每轮 5s 余量 = 155+215+245 ≈ 615s。
+      // 客户端超时必须大于它，否则会在服务端还在跑时就先断开，只报一句「生成异常」。
+      const r = await postJSON('/generate', { sessionId: sid }, 700_000)
       // 失败详情现在带各轮遥测，可能较长——err toast 停留 6s，截断放宽到 400 字
       if (!r.ok) { toast('生成失败：' + String(r.error).slice(0, 400), 'err'); return }
       await reload()
