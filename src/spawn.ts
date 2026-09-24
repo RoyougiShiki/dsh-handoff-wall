@@ -14,6 +14,15 @@ import { randomUUID } from 'node:crypto'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { BoardDomain, NoteRow } from './store.js'
 
+// 消息来源是 harness 的合并扩展和类型：没有共享的 catch-all `kind: 'plugin'`
+// （0.1.7-rc.1 起已移除），每个产出方在自己的模块里声明自己的 kind。
+// 声明后接续注入才有一个稳定、可 grep 的产出方标记。
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-handoff-board': { kind: 'dsh-handoff-board' }
+  }
+}
+
 type SessionHeaderLike = { cwd?: string; agentPreset?: string }
 type SessionEventLike = { type?: string; data?: { agentPreset?: string } }
 type SessionLogLike = { session?: SessionHeaderLike; events?: readonly SessionEventLike[] }
@@ -184,7 +193,7 @@ export async function continueWithNote(
 
   handle.agent.inject(
     createUserMessage({
-      source: { kind: 'plugin', plugin: 'dsh-handoff-board' },
+      source: { kind: 'dsh-handoff-board' },
       content: [{ type: 'text', text: injection }],
     }),
   )

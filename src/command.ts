@@ -114,9 +114,20 @@ export function extractMaterial(events: any[]): MaterialResult {
   for (const e of events) {
     const type = e?.type ?? ''
     if (type !== 'user/message' && type !== 'assistant/message') continue
-    // 插件注入消息（接续全文/通知）不是人类对话：混进取材会让交接条逐轮复读膨胀
-    // （2026-08-28 事故：接续注入的上一条全文被工人再总结进新条，874字→2290字循环增长）
-    if (e?.data?.source?.kind === 'plugin') continue
+    // 插件注入消息（接续全文/通知/AGENTS.md/技能目录）不是人类对话：混进取材会让
+    // 交接条逐轮复读膨胀（2026-08-28 事故：接续注入的上一条全文被工人再总结进新条，
+    // 874字→2290字循环增长）。
+    // 判据用「人类直输」这条正面规则，而不是列举插件 kind：harness 的消息来源是
+    // 合并扩展和类型（每个产出方自带 kind，0.1.7-rc.1 起已无共享的 'plugin'），
+    // 实测同一批会话的 user/message 就出现过 user / plugin / skill-catalog /
+    // agent-instructions 四种 kind，枚举法必然漏。
+    // 只对 user/message 生效：assistant/message 在日志里根本不带 source.kind，
+    // 一并过滤会把助手正文全丢掉。
+    if (type === 'user/message') {
+      const kind = e?.data?.source?.kind
+      // kind 缺失（旧日志）时放行，保持向后兼容。
+      if (kind !== undefined && kind !== 'user') continue
+    }
     const text = eventPlainText(e)
     if (!text.trim()) continue
 
