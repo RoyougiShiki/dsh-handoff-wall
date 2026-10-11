@@ -6,10 +6,10 @@ DSH 会话间上下文交接与线程时间线可视化插件：换班写交接�
 
 **铁律与正确流程在工作区根目录 [../AGENTS.md](../AGENTS.md)**（所有会话自动加载）。速记：
 
-- 开发/调试期只用 super-injector 三件套（inject / uninject / clear-routes）
-- 禁止 `dev_install_package`、禁止手改 `~/.dsh/profiles/**`
-- 任何情况不重启 dsh-web
-- 正式转正：`dsh plugin --profile web add link:/mnt/f/AIProjects/dsh-plugins/dsh-handoff-wall`
+- 安装与更新都走一条命令（重复执行即更新）：`dsh plugin --profile web add link:/mnt/f/AIProjects/dsh-plugins/dsh-handoff-wall`
+- 装完用 `dsh --profile web --dump-config | grep handoff` 证明挂载成功
+- 禁止手改 `~/.dsh/profiles/**`；任何情况不重启用户的 dsh-web（要宿主内验证就另起独立 `DSH_HOME` 实例）
+- super-injector 三件套（inject / uninject / clear-routes）已不存在，别去找
 
 ## 使用
 
@@ -26,7 +26,8 @@ DSH 会话间上下文交接与线程时间线可视化插件：换班写交接�
 
 ## 文档
 
-- 术语表 [CONTEXT.md](CONTEXT.md) · 决策记录 [docs/adr/](docs/adr/)
+- 术语表 [GLOSSARY.md](GLOSSARY.md) · 决策记录 [docs/adr/](docs/adr/)
+- 注：`GLOSSARY.md` 原名 `CONTEXT.md`，2026-10-11 随 Matt Pocock skills v1.3.x 改名；docs/adr/ 与历史票据里提到 `CONTEXT.md` 的地方是改名前的记录，未回填。
 - 实现契约与验收脚本 [.scratch/v0/spec.md](.scratch/v0/spec.md)
 - wayfinder 地图与决策票 [.scratch/v0/](.scratch/v0/)
 
