@@ -1,5 +1,9 @@
 # v0.0.3 接续血缘迁入账本 links 表，取材过滤插件注入
 
+## 状态
+
+已采纳并已实施（Accepted, implemented）——依据：`src/store.ts` 有 `LinkRow`/`linkSchema` 并把 `links` 表并入 `boardSpec`，`parentOfSession` 做「links 优先、回退 `header.parentSession`」；读取侧按本件规则实现（`src/command.ts` 调 `parentOfSession`；`src/routes.ts` `/state` 的 `parentOf` 语义相同但把「links 优先、回退 header」在本地又写了一遍，没复用 `parentOfSession`——本件「统一走 parentOfSession」只落了一半，属实现偏差不是决策反转）；`src/spawn.ts` 的 `continueWithNote` 建会话后只 `domain.table('links').put(...)`，`agents.create` 的 `meta` 里不再有 `parentSession`；`src/client/index.ts` 的 `kinshipOf`/`buildTree` 只对 `kind === 'subagent'` 建父子边（主会话含接续会话恒为根）；`src/command.ts` 的 `extractMaterial` 过滤注入消息；「存量污染不动」照本件执行（无任何历史数据迁移代码）。本件第三条的**字面判据**已被后续兼容修复改写、结论与意图未变：DSH 0.1.7-rc.1 移除了共享 `kind: 'plugin'`（commit `db1dd28`，2026-09-24），过滤从「跳过 `source.kind === 'plugin'`」换成「只认人类直输 `kind === 'user'`」的正面规则，因此凡引用本件原话「`source.kind === 'plugin'`」的地方（如 ADR-0007 的 Consequences）都需按新判据理解。ADR-0009 决策第 2 条确认 `links` 表「保持不变」（事实型血缘，与本件新增的判断型关系分流），属沿用而非取代。
+
 两个 2026-08-28/29 用户反馈暴露的同根问题：接续会话被当成「子代理子会话」对待。
 
 1. **交接条循环增长**：`continueWithNote` 注入的上一条交接条全文（`source.kind=plugin` 的 user/message）被 `extractMaterial` 当成对话轮收进取材，工人再总结进新条——874 字 → 2290 字逐轮膨胀；无实际工作的接续会话也产出复读条（`7148da5c`）。
